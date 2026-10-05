@@ -1,26 +1,17 @@
 {
-  "name": "claude-doc",
+  "name": "real-time-sketchpad",
   "version": "0.1.0",
   "private": true,
+  "description": "A real-time collaborative sketchpad built with Next.js and FastAPI",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "next": "16.3.8",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "dev": "concurrently \"npm run dev -w frontend\" \"uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000\"",
+    "dev:frontend": "npm run dev -w frontend",
+    "dev:backend": "uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000",
+    "build": "npm run build -w frontend",
+    "start": "npm run start -w frontend",
+    "lint": "npm run lint -w frontend"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.8",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "concurrently": "^8.2.2"
   }
 }

@@ -1,36 +1,130 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Real-time Collaborative Sketchpad
+
+A lightweight, real-time collaborative sketchpad for teams to visually share ideas, wireframes, and notes instantly.
+
+## Features
+
+- Real-time drawing synchronization using WebSockets
+- Create/share collaboration rooms via simple URLs
+- See other users' cursors and drawings in real-time
+- Handle network reconnections gracefully
+- Support for late-joining users
+- Clean, minimal interface
+
+## Tech Stack
+
+**Frontend:** Next.js 16+, TypeScript, React, Custom canvas with requestAnimationFrame, Tailwind CSS 4
+
+**Backend:** Python 3.9+, FastAPI, WebSocket via Uvicorn
+
+**Data Storage (MVP):** In-memory room management (Redis optional for scaling)
+
+## Project Structure
+
+```
+real-time-sketchpad/
+├── frontend/          # Next.js application
+│   ├── app/
+│   ├── public/
+│   ├── package.json
+│   ├── next.config.ts
+│   ├── tsconfig.json
+│   └── ...
+├── backend/           # FastAPI/Python backend
+│   ├── main.py
+│   ├── requirements.txt
+│   └── app/
+├── README.md
+├── package.json       # Root project scripts
+└── blueprint/         # AI Blueprint workflow files
+```
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+- Node.js 18+ and npm
+- Python 3.9+
+
+### Installation
+
+1. Clone the repository
+2. Install dependencies:
+
+```bash
+# Install frontend dependencies
+npm install -w frontend
+
+# Install backend dependencies
+cd backend
+pip install -r requirements.txt
+cd ..
+```
+
+### Development
+
+To run both frontend and backend concurrently:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+This will start:
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+To run only the frontend:
+```bash
+npm run dev:frontend
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+To run only the backend:
+```bash
+npm run dev:backend
+```
 
-## Learn More
+### Building for Production
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+This builds the frontend for production. The backend is ready to run as-is.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Linting
 
-## Deploy on Vercel
+```bash
+npm run lint
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## API Endpoints
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `GET /` - Root endpoint returning API info
+- `GET /health` - Health check endpoint
+
+WebSocket endpoints are handled at `/ws/{room_id}` for real-time communication.
+
+## Deployment
+
+### Frontend (Vercel/Netlify)
+- Connect your Git repository
+- Set the root directory to `./frontend`
+- Vercel/Netlify will automatically detect and build the Next.js app
+
+### Backend (Render/Fly.io)
+- Deploy the `backend/` directory
+- Set the start command to: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+- Ensure PORT environment variable is set by the platform
+
+## Environment Variables
+
+Create a `.env` file in the backend directory:
+
+```
+PORT=8000
+# Add DATABASE_URL here if adding persistence later
+```
+
+## License
+
+MIT
