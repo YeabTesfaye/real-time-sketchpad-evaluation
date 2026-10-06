@@ -16,16 +16,18 @@ Start with your first real slice of functionality.
 
 ## Your features
 
-- [ ] 1. **Room creation and basic WebSocket connection** - Users can generate/share a room URL and establish a real-time connection
+- [ ] 1. **Room creation and basic WebSocket connection** - Users can generate/share a room URL and establish a real-time connection (with validation, rate limits, and room isolation)
 - [ ] 2. **Basic pen tool drawing** - Freehand drawing with mouse/touch on canvas (single user, no sync yet)
-- [ ] 3. **Real-time drawing operation synchronization** - See remote users' strokes appear as they draw (event/operation-based sync)
-- [ ] 4. **Cursor visibility and basic presence** - See your own cursor on canvas
+- [ ] 3. **Real-time drawing operation synchronization** - See remote users' strokes appear as they draw (event/operation-based sync, not full state sync)
+- [ ] 4. **Cursor visibility** - See your own cursor on canvas
 - [ ] 5. **Real-time cursor synchronization** - See remote users' cursors move in real-time with names/colors
-- [ ] 6. **Handle reconnections gracefully** - Resume drawing after network interruption
-- [ ] 7. **Support late-joining users** - Sync current canvas state to new participants
-- [ ] 8. **Clear canvas** - Reset the drawing area to blank
-- [ ] 9. **Shape tools (rectangle, ellipse, line)** - Add basic geometric shapes with styling (optional later)
-- [ ] 10. **Text tool** - Insert and edit text boxes/sticky notes on canvas (optional later)
-- [ ] 11. **Undo/redo functionality** - Step backward and forward through drawing actions (optional later)
-- [ ] 12. **Room persistence (optional)** - Save/load room states for later reuse (optional later)
-- [ ] 13. **UI polishing and responsiveness** - Refine layout, touch support, and visual feedback (optional later)
+- [ ] 6. **Basic presence indicators** - Show when users join/leave rooms and their active status
+- [ ] 7. **Handle reconnections gracefully** - Resume drawing after network interruption with proper state recovery
+- [ ] 8. **Support late-joining users** - Sync current canvas state to new participants via operation history
+- [ ] 9. **Clear canvas** - Reset the drawing area to blank
+- [ ] 10. **Shape tools (rectangle, ellipse, line)** - Add basic geometric shapes with styling (optional later)
+- [ ] 11. **Text tool** - Insert and edit text boxes/sticky notes on canvas (optional later)
+- [ ] 12. **Undo/redo functionality** - Step backward and forward through drawing actions (optional later)
+- [ ] 13. **Room persistence (optional)** - Save/load room states for later reuse (optional later)
+- [ ] 14. **UI polishing and responsiveness** - Refine layout, touch support, and visual feedback (optional later)
+- [ ] 15. **Performance measurement** - Monitor drawing responsiveness and WebSocket latency (optional later)
