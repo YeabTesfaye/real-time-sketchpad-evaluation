@@ -22,117 +22,185 @@ const NAV_LINKS = [
   { href: "/#features", label: "Features" },
 ];
 
+// Declared at module level so component identity is stable across renders
+function ThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme();
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-9 w-9 border-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
+      aria-label="Toggle theme"
+      onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+    >
+      {/* Both icons render, CSS picks one, so there is no hydration mismatch */}
+      <Sun className="hidden h-4 w-4 dark:block" />
+      <Moon className="h-4 w-4 dark:hidden" />
+    </Button>
+  );
+}
+
+function AuthActions() {
+  return (
+    <>
+      <Button
+        asChild
+        variant="ghost"
+        className="h-9 border-transparent px-3 text-muted-foreground hover:bg-secondary hover:text-foreground"
+      >
+        <Link href="/login">Log in</Link>
+      </Button>
+      <Button asChild className="h-9 px-4 shadow-sm">
+        <Link href="/signup">Sign up</Link>
+      </Button>
+    </>
+  );
+}
+
 export default function SiteHeader() {
   const pathname = usePathname();
-  const { resolvedTheme, setTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
 
-  // Close the sheet after any route change
+  // Passive scroll listener for the border/shadow state
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMenuOpen(false);
+    const handleScroll = () => setScrolled(window.scrollY > 8);
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  // Scroll-spy, home page only
+  useEffect(() => {
+    if (pathname !== "/") return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const hit = entries.find((entry) => entry.isIntersecting);
+        if (hit) setActiveSectionId(hit.target.id);
+      },
+      { rootMargin: "-40% 0px -50% 0px", threshold: 0 }
+    );
+
+    ["how-it-works", "features"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+
+    return () => observer.disconnect();
   }, [pathname]);
 
   const closeMenu = () => setMenuOpen(false);
 
+  const isSectionActive = (href: string) =>
+    pathname === "/" && activeSectionId === href.split("#")[1];
+
   return (
-    <header className="sticky top-0 z-50 h-16 border-b border-border bg-background/85 backdrop-blur">
-      <div className="mx-auto flex h-full w-full max-w-6xl items-center gap-6 px-6">
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-2.5 text-foreground">
-          <PencilLine className="h-6 w-6" aria-hidden="true" />
-          <span className="font-serif text-2xl font-semibold leading-none">Sketchpad</span>
+    <header
+      className={cn(
+        "sticky top-0 z-50 h-16 border-b bg-background/80 backdrop-blur-md transition-shadow",
+        scrolled ? "border-border shadow-sm" : "border-transparent"
+      )}
+    >
+      <div className="mx-auto flex h-full w-full max-w-[1600px] items-center gap-8 px-4 sm:px-6 lg:px-10">
+        {/* Left: logo */}
+        <Link
+          href="/"
+          className="flex shrink-0 items-center gap-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <PencilLine className="h-5 w-5" aria-hidden="true" />
+          <span className="font-serif text-xl font-semibold tracking-tight">Sketchpad</span>
         </Link>
 
-        {/* Desktop nav */}
-        <nav aria-label="Main" className="hidden items-center gap-6 md:flex">
-          {NAV_LINKS.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="rounded-sm text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {link.label}
-            </Link>
-          ))}
+        {/* Nav sits next to the logo instead of floating in the middle */}
+        <nav className="hidden items-center gap-1 md:flex" aria-label="Main">
+          {NAV_LINKS.map((link) => {
+            const isActive = isSectionActive(link.href);
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                aria-current={isActive ? "location" : undefined}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  isActive && "bg-secondary text-foreground"
+                )}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
         </nav>
 
-        {/* Right zone */}
-        <div className="ml-auto flex items-center gap-2">
-          {/* Both icons render, CSS picks one, so there is no hydration mismatch */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9"
-            aria-label="Toggle theme"
-            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-          >
-            <Sun className="hidden h-4 w-4 dark:block" />
-            <Moon className="h-4 w-4 dark:hidden" />
-          </Button>
-
-          {/* Desktop auth buttons */}
-          <div className="hidden items-center gap-2 md:flex">
-            <Button asChild variant="ghost" className="h-9 px-4">
-              <Link href="/login">Log in</Link>
-            </Button>
-            <Button asChild className="h-9 px-4">
-              <Link href="/signup">Sign up</Link>
-            </Button>
+        {/* Right: pushed to the far edge */}
+        <div className="ml-auto flex items-center gap-1.5">
+          <div className="hidden items-center gap-1.5 md:flex">
+            <AuthActions />
           </div>
 
+          <div className="mx-2 hidden h-5 w-px bg-border md:block" aria-hidden="true" />
+
+          <ThemeToggle />
+
           {/* Mobile menu */}
-          <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 md:hidden"
-                aria-label="Open menu"
-              >
-                <Menu className="h-5 w-5" />
-              </Button>
-            </SheetTrigger>
-
-            <SheetContent side="left" className="flex w-72 flex-col gap-0 p-0">
-              <SheetHeader className="border-b border-border p-6">
-                <SheetTitle className="font-serif text-xl font-semibold">Sketchpad</SheetTitle>
-                <SheetDescription className="sr-only">Site navigation</SheetDescription>
-              </SheetHeader>
-
-              <nav aria-label="Mobile" className="flex flex-1 flex-col gap-1 p-4">
-                <Link
-                  href="/"
-                  onClick={closeMenu}
-                  className={cn(
-                    "rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground",
-                    pathname === "/" && "text-foreground"
-                  )}
+          <div className="flex items-center md:hidden">
+            <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+              <SheetTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 border-transparent"
+                  aria-label="Open menu"
                 >
-                  Home
-                </Link>
-                {NAV_LINKS.map((link) => (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    onClick={closeMenu}
-                    className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                  >
-                    {link.label}
-                  </Link>
-                ))}
-              </nav>
+                  <Menu className="h-5 w-5" />
+                </Button>
+              </SheetTrigger>
 
-              <SheetFooter className="flex-col gap-2 border-t border-border p-4 sm:flex-col sm:space-x-0">
-                <Button asChild variant="outline" className="h-10 w-full" onClick={closeMenu}>
-                  <Link href="/login">Log in</Link>
-                </Button>
-                <Button asChild className="h-10 w-full" onClick={closeMenu}>
-                  <Link href="/signup">Sign up</Link>
-                </Button>
-              </SheetFooter>
-            </SheetContent>
-          </Sheet>
+              <SheetContent side="right" className="flex w-72 flex-col gap-0 p-0">
+                <SheetHeader className="border-b p-6">
+                  <SheetTitle className="font-serif text-xl font-semibold">Sketchpad</SheetTitle>
+                  <SheetDescription className="sr-only">Site navigation</SheetDescription>
+                </SheetHeader>
+
+                <nav aria-label="Mobile" className="flex flex-1 flex-col gap-1 p-4">
+                  <Link
+                    href="/"
+                    onClick={closeMenu}
+                    className={cn(
+                      "flex h-11 items-center rounded-md px-3 text-base transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      pathname === "/" && "bg-secondary text-foreground"
+                    )}
+                  >
+                    Home
+                  </Link>
+                  {NAV_LINKS.map((link) => (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      onClick={closeMenu}
+                      className={cn(
+                        "flex h-11 items-center rounded-md px-3 text-base transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        isSectionActive(link.href) && "bg-secondary text-foreground"
+                      )}
+                    >
+                      {link.label}
+                    </Link>
+                  ))}
+                </nav>
+
+                <SheetFooter className="flex-col gap-2 border-t border-border p-4 sm:flex-col sm:space-x-0">
+                  <Button asChild variant="outline" className="h-11 w-full">
+                    <Link href="/login" onClick={closeMenu}>Log in</Link>
+                  </Button>
+                  <Button asChild className="h-11 w-full">
+                    <Link href="/signup" onClick={closeMenu}>Sign up</Link>
+                  </Button>
+                </SheetFooter>
+              </SheetContent>
+            </Sheet>
+          </div>
         </div>
       </div>
     </header>
