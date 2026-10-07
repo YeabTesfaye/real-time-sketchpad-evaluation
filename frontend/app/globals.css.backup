@@ -14,8 +14,8 @@
   --secondary-foreground: #16140F;
   --muted: #ECE7DB;
   --muted-foreground: #6B665B;
-  --accent: #ECE7DB;
-  --accent-foreground: #16140F;
+  --accent: #D63B1F;
+  --accent-foreground: #FFFFFF;
   --destructive: #E5472B;
   --destructive-foreground: #FFFFFF;
   --border: #DDD7C8;
@@ -38,8 +38,8 @@
   --secondary-foreground: #F1EDE2;
   --muted: #26241D;
   --muted-foreground: #A8A294;
-  --accent: #2B2920;
-  --accent-foreground: #F1EDE2;
+  --accent: #FF6A4D;
+  --accent-foreground: #14130F;
   --destructive: #FF6A4D;
   --destructive-foreground: #14130F;
   --border: #2B2920;
@@ -69,19 +69,10 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  --font-sans: var(--font-sans);
+  --radius: var(--radius);
+  --card-radius: var(--card-radius);
   --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
   --font-serif: var(--font-display);
-
-  --radius-sm: calc(var(--radius) - 0.25rem);
-  --radius-md: calc(var(--radius) - 0.125rem);
-  --radius-lg: var(--radius);
-  --radius-card: var(--card-radius);
-}
-
-@layer base {
-  * { @apply border-border outline-ring/50; }
-  body { @apply bg-background text-foreground font-sans; }
-  html { scroll-behavior: smooth; }
 }

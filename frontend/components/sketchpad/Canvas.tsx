@@ -9,28 +9,17 @@ interface CanvasProps {
   height: number;
   roomId: string;
   userId: string;
-  userName: string;
-  userColor: string;
   currentColor: string;
   currentSize: number;
 }
 
-export function SketchpadCanvas({ width, height, roomId, userId, userName, userColor, currentColor, currentSize }: CanvasProps) {
+export function SketchpadCanvas({ width, height, roomId, userId, currentColor, currentSize }: CanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [localOperations, setLocalOperations] = useState<DrawingOperation[]>([]);
   const [remoteOperations, setRemoteOperations] = useState<DrawingOperation[]>([]);
   const [remoteCursors, setRemoteCursors] = useState<Record<string, {x: number, y: number, color: string, name: string, timestamp: number}>>({});
   const [isDrawing, setIsDrawing] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
-  const [error, setError] = useState<string | null>(null);
-
-  const { sendMessage: webSocketSendMessage, messages, connectionStatus: wsConnectionStatus, error: wsError } = useWebSocket(roomId);
-
-  // Update connection status from WebSocket hook
-  useEffect(() => {
-    setConnectionStatus(wsConnectionStatus);
-    setError(wsError);
-  }, [wsConnectionStatus, wsError]);
+  const { sendMessage: webSocketSendMessage, messages, connectionStatus, error } = useWebSocket(roomId);
 
   // Process incoming WebSocket messages
   useEffect(() => {
@@ -41,27 +30,82 @@ export function SketchpadCanvas({ width, height, roomId, userId, userName, userC
           setRemoteOperations(prev => [...prev, operation]);
         }
       } else if (message.type === 'cursor_move' && message.userId !== userId) {
-        // Handle cursor move from other users
+        // Handle cursor position updates from other users
         const cursorData = OperationUtils.deserializeCursorPosition(message);
         if (cursorData) {
           setRemoteCursors(prev => ({
             ...prev,
             [cursorData.userId]: {
+              ...(prev[cursorData.userId] || {}),
               x: cursorData.position.x,
               y: cursorData.position.y,
-              color: message.color || '#000000', // Default color if not provided
-              name: message.name || `User-${cursorData.userId.substring(0, 4)}`,
               timestamp: Date.now()
             }
           }));
         }
+      } else if (message.type === 'user_joined') {
+        // Handle new user joining - store their color and name
+        if (message.user) {
+          setRemoteCursors(prev => ({
+            ...prev,
+            [message.user.userId]: {
+              ...(prev[message.user.userId] || {}),
+              color: message.user.color,
+              name: message.user.name,
+              timestamp: Date.now()
+            }
+          }));
+        }
+      } else if (message.type === 'user_left') {
+        // Handle user leaving - remove them from cursors
+        if (message.userId) {
+          setRemoteCursors(prev => {
+            const { [message.userId]: removed, ...rest } = prev;
+            return rest;
+          });
+        }
       } else if (message.type === 'clear_canvas') {
+        // Handle clear canvas command
         setRemoteOperations([]);
         setLocalOperations([]);
         setRemoteCursors({}); // Clear remote cursors too
       }
     });
   }, [messages, userId]);
+
+  // Draw a single operation
+  const drawOperation = useCallback((ctx: CanvasRenderingContext2D, operation: DrawingOperation) => {
+    if (operation.points.length === 0) return;
+
+    ctx.beginPath();
+    ctx.moveTo(operation.points[0].x, operation.points[0].y);
+
+    for (let i = 1; i < operation.points.length; i++) {
+      ctx.lineTo(operation.points[i].x, operation.points[i].y);
+    }
+
+    ctx.strokeStyle = operation.color;
+    ctx.lineWidth = operation.size;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }, []);
+
+  // Redraw canvas with all operations
+  const redrawCanvas = useCallback((ctx: CanvasRenderingContext2D) => {
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Draw local operations
+    localOperations.forEach(op => {
+      drawOperation(ctx, op);
+    });
+
+    // Draw remote operations
+    remoteOperations.forEach(op => {
+      drawOperation(ctx, op);
+    });
+  }, [width, height, localOperations, remoteOperations]);
 
   // Initialize canvas
   useEffect(() => {
@@ -86,39 +130,17 @@ export function SketchpadCanvas({ width, height, roomId, userId, userName, userC
     };
   }, [width, height, localOperations, remoteOperations]);
 
-  // Redraw canvas with all operations
-  const redrawCanvas = useCallback((ctx: CanvasRenderingContext2D) => {
-    // Clear canvas
-    ctx.clearRect(0, 0, width, height);
-
-    // Draw local operations
-    localOperations.forEach(op => {
-      drawOperation(ctx, op);
+  // Send cursor position
+  const sendCursorPosition = useCallback((position: {x: number, y: number}) => {
+    // Throttle cursor updates to prevent too many messages
+    // In a real implementation, we'd use requestAnimationFrame or lodash.throttle
+    webSocketSendMessage({
+      type: 'cursor_move',
+      userId,
+      position,
+      timestamp: new Date().toISOString()
     });
-
-    // Draw remote operations
-    remoteOperations.forEach(op => {
-      drawOperation(ctx, op);
-    });
-  }, [width, height, localOperations, remoteOperations]);
-
-  // Draw a single operation
-  const drawOperation = useCallback((ctx: CanvasRenderingContext2D, operation: DrawingOperation) => {
-    if (operation.points.length === 0) return;
-
-    ctx.beginPath();
-    ctx.moveTo(operation.points[0].x, operation.points[0].y);
-
-    for (let i = 1; i < operation.points.length; i++) {
-      ctx.lineTo(operation.points[i].x, operation.points[i].y);
-    }
-
-    ctx.strokeStyle = operation.color;
-    ctx.lineWidth = operation.size;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-  }, []);
+  }, [webSocketSendMessage, userId]);
 
   // Handle mouse/touch events
   const handlePointerDown = useCallback((e: PointerEvent) => {
@@ -169,13 +191,6 @@ export function SketchpadCanvas({ width, height, roomId, userId, userName, userC
     sendCursorPosition({x, y});
   }, [isDrawing, sendCursorPosition, userId]);
 
-  const handlePointerUp = useCallback(() => {
-    setIsDrawing(false);
-
-    // Send the completed drawing operation
-    sendDrawingOperation();
-  }, []);
-
   // Send drawing operation to server
   const sendDrawingOperation = useCallback(() => {
     if (localOperations.length === 0) return;
@@ -189,22 +204,31 @@ export function SketchpadCanvas({ width, height, roomId, userId, userName, userC
       userId: userId
     };
 
-    webSocketSendMessage(OperationUtils.serializeOperation(operationToSend));
+    webSocketSendMessage({
+      type: 'drawing_operation',
+      operation: {
+        ...operationToSend
+      }
+    });
   }, [webSocketSendMessage, userId]);
 
-  // Send cursor position
-  const sendCursorPosition = useCallback((position: {x: number, y: number}) => {
-    // Throttle cursor updates to prevent too many messages
-    // In a real implementation, we'd use requestAnimationFrame or lodash.throttle
-    webSocketSendMessage(OperationUtils.serializeCursorPosition(userId, position));
-  }, [webSocketSendMessage, userId]);
+  const handlePointerUp = useCallback(() => {
+    setIsDrawing(false);
+
+    // Send the completed drawing operation
+    sendDrawingOperation();
+  }, []);
 
   // Clear canvas
   const handleClearCanvas = useCallback(() => {
     setLocalOperations([]);
     setRemoteOperations([]);
     setRemoteCursors({}); // Clear remote cursors too
-    webSocketSendMessage(OperationUtils.serializeClearCanvas(userId));
+    webSocketSendMessage({
+      type: 'clear_canvas',
+      userId,
+      timestamp: new Date().toISOString()
+    });
   }, [webSocketSendMessage, userId]);
 
   // Set up pointer event listeners
