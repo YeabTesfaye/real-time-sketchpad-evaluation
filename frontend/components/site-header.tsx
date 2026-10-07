@@ -1,149 +1,140 @@
 'use client';
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { PencilLine, Sun, Moon } from "lucide-react";
+import { Menu, PencilLine, Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+
+const NAV_LINKS = [
+  { href: "/#how-it-works", label: "How it works" },
+  { href: "/#features", label: "Features" },
+];
 
 export default function SiteHeader() {
   const pathname = usePathname();
   const { resolvedTheme, setTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const isActive = (href: string) => pathname === href;
+  // Close the sheet after any route change
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMenuOpen(false);
+  }, [pathname]);
+
+  const closeMenu = () => setMenuOpen(false);
 
   return (
-    <header className="sticky top-0 z-50 h-16 border-b border-border bg-background/85 backdrop-blur flex items-center px-4">
-      {/* Left zone: Logo + icon */}
-      <div className="flex items-center gap-3">
-        <PencilLine className="h-6 w-6 stroke-current" />
-        <Link href="/" className="text-2xl font-serif font-semibold text-foreground hover:no-underline">
-          Sketchpad
+    <header className="sticky top-0 z-50 h-16 border-b border-border bg-background/85 backdrop-blur">
+      <div className="mx-auto flex h-full w-full max-w-6xl items-center gap-6 px-6">
+        {/* Logo */}
+        <Link href="/" className="flex items-center gap-2.5 text-foreground">
+          <PencilLine className="h-6 w-6" aria-hidden="true" />
+          <span className="font-serif text-2xl font-semibold leading-none">Sketchpad</span>
         </Link>
-      </div>
 
-      {/* Center zone: Navigation links (hidden on mobile) */}
-      <div className="hidden md:flex items-center space-x-6">
-        <Link
-          href="#how-it-works"
-          className={cn(
-            "text-sm text-muted-foreground hover:text-foreground",
-            isActive("#how-it-works") ? "text-foreground" : ""
-          )}
-        >
-          How it works
-        </Link>
-        <Link
-          href="#features"
-          className={cn(
-            "text-sm text-muted-foreground hover:text-foreground",
-            isActive("#features") ? "text-foreground" : ""
-          )}
-        >
-          Features
-        </Link>
-      </div>
-
-      {/* Right zone: Theme toggle, Log in, Sign up */}
-      <div className="ml-auto flex items-center space-x-3">
-        {/* Theme toggle as shadcn Button variant="ghost" */}
-        <Button
-          variant="ghost"
-          onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
-          aria-label="Toggle theme"
-          className="p-1 [&>svg]:h-4 [&>svg]:w-4"
-        >
-          {resolvedTheme === 'dark' ? (
-            <Sun className="text-accent" />
-          ) : (
-            <Moon className="text-accent" />
-          )}
-        </Button>
-
-        {/* Log in button */}
-        <Button variant="ghost">
-          <Link href="/login">Log in</Link>
-        </Button>
-
-        {/* Sign up button - using primary variant */}
-        <Button variant="default">
-          <Link href="/signup">Sign up</Link>
-        </Button>
-      </div>
-
-      {/* Mobile menu trigger (hamburger) */}
-      <div className="md:hidden">
-        <Button
-          variant="ghost"
-          onClick={() => setMenuOpen(!menuOpen)}
-          aria-label="Open menu"
-          className="p-1 [&>div]:h-0.5 [&>div]:w-4"
-        >
-          {/* Hamburger icon */}
-          <div className="flex flex-col gap-1">
-            <div className="h-0.5 w-4 bg-muted-foreground" />
-            <div className="h-0.5 w-4 bg-muted-foreground" />
-            <div className="h-0.5 w-4 bg-muted-foreground" />
-          </div>
-        </Button>
-      </div>
-
-      {/* Mobile menu using shadcn Sheet */}
-      <Sheet side="top">
-        <SheetContent>
-          <SheetHeader className="space-y-4">
-            <SheetTitle className="text-xl font-serif font-semibold">
-              Sketchpad
-            </SheetTitle>
-            <SheetDescription className="text-sm text-muted-foreground">
-              Navigation menu
-            </SheetDescription>
-          </SheetHeader>
-
-          <SheetContent className="space-y-4">
+        {/* Desktop nav */}
+        <nav aria-label="Main" className="hidden items-center gap-6 md:flex">
+          {NAV_LINKS.map((link) => (
             <Link
-              href="/"
-              className={cn(
-                "block text-sm text-muted-foreground hover:text-foreground",
-                isActive("/") ? "text-foreground" : ""
-              )}
+              key={link.href}
+              href={link.href}
+              className="rounded-sm text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              Home
+              {link.label}
             </Link>
-            <Link
-              href="#how-it-works"
-              className={cn(
-                "block text-sm text-muted-foreground hover:text-foreground",
-                isActive("#how-it-works") ? "text-foreground" : ""
-              )}
-            >
-              How it works
-            </Link>
-            <Link
-              href="#features"
-              className={cn(
-                "block text-sm text-muted-foreground hover:text-foreground",
-                isActive("#features") ? "text-foreground" : ""
-              )}
-            >
-              Features
-            </Link>
-          </SheetContent>
+          ))}
+        </nav>
 
-          <SheetFooter className="space-y-4">
-            <Button variant="ghost" className="w-full">
+        {/* Right zone */}
+        <div className="ml-auto flex items-center gap-2">
+          {/* Both icons render, CSS picks one, so there is no hydration mismatch */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9"
+            aria-label="Toggle theme"
+            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+          >
+            <Sun className="hidden h-4 w-4 dark:block" />
+            <Moon className="h-4 w-4 dark:hidden" />
+          </Button>
+
+          {/* Desktop auth buttons */}
+          <div className="hidden items-center gap-2 md:flex">
+            <Button asChild variant="ghost" className="h-9 px-4">
               <Link href="/login">Log in</Link>
             </Button>
-            <Button variant="default" className="w-full mt-2">
+            <Button asChild className="h-9 px-4">
               <Link href="/signup">Sign up</Link>
             </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+          </div>
+
+          {/* Mobile menu */}
+          <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+            <SheetTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 md:hidden"
+                aria-label="Open menu"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+
+            <SheetContent side="left" className="flex w-72 flex-col gap-0 p-0">
+              <SheetHeader className="border-b border-border p-6">
+                <SheetTitle className="font-serif text-xl font-semibold">Sketchpad</SheetTitle>
+                <SheetDescription className="sr-only">Site navigation</SheetDescription>
+              </SheetHeader>
+
+              <nav aria-label="Mobile" className="flex flex-1 flex-col gap-1 p-4">
+                <Link
+                  href="/"
+                  onClick={closeMenu}
+                  className={cn(
+                    "rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground",
+                    pathname === "/" && "text-foreground"
+                  )}
+                >
+                  Home
+                </Link>
+                {NAV_LINKS.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    onClick={closeMenu}
+                    className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+              </nav>
+
+              <SheetFooter className="flex-col gap-2 border-t border-border p-4 sm:flex-col sm:space-x-0">
+                <Button asChild variant="outline" className="h-10 w-full" onClick={closeMenu}>
+                  <Link href="/login">Log in</Link>
+                </Button>
+                <Button asChild className="h-10 w-full" onClick={closeMenu}>
+                  <Link href="/signup">Sign up</Link>
+                </Button>
+              </SheetFooter>
+            </SheetContent>
+          </Sheet>
+        </div>
+      </div>
     </header>
   );
 }

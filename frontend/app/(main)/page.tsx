@@ -1,9 +1,9 @@
 "use client";
 
-export const metadata = {
-  title: "Sketchpad - Draw it out together",
-  description: "Draw it out together. Collaborative sketching for designers, engineers and students.",
-};
+// export const metadata = {
+//   title: "Sketchpad - Draw it out together",
+//   description: "Draw it out together. Collaborative sketching for designers, engineers and students.",
+// };
 
 import { MousePointer2, Lock, Smartphone, PenTool, Code2, GraduationCap, RefreshCw, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";

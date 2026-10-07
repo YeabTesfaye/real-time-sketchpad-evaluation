@@ -1,4 +1,5 @@
 import { forwardRef } from 'react';
+import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
@@ -14,35 +15,52 @@ const buttonVariants = cva(
         ghost: "hover:bg-accent/10 hover:text-accent",
         link: "text-primary underline-offset-4 hover:underline",
       },
+      size: {
+        default: "h-10 px-4 py-2",
+        sm: "h-9 px-3",
+        lg: "h-11 px-8",
+        icon: "h-10 w-10",
+      },
     },
+    // No default size on purpose, so existing buttons keep their current layout
     defaultVariants: {
       variant: "default",
     },
   }
 );
 
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: VariantProps<typeof buttonVariants>["variant"];
-  className?: string;
+interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean;
   isLoading?: boolean;
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({
-    className,
-    variant = "default",
-    children,
-    isLoading = false,
-    ...props
-  }, ref) => {
+  (
+    {
+      className,
+      variant = "default",
+      size,
+      asChild = false,
+      isLoading = false,
+      disabled,
+      children,
+      ...props
+    },
+    ref
+  ) => {
+    const Comp = asChild ? Slot : "button";
+
     return (
-      <button
+      <Comp
         ref={ref}
-        className={cn(buttonVariants({ variant, className }), isLoading && "opacity-50")}
+        className={cn(buttonVariants({ variant, size }), isLoading && "opacity-50", className)}
         {...props}
-        disabled={isLoading}
+        // Slot forwards props to the child (e.g. <Link>), so don't put `disabled` on it
+        {...(asChild ? {} : { disabled: disabled || isLoading })}
       >
-        {isLoading ? (
+        {isLoading && !asChild ? (
           <div className="flex items-center gap-2">
             <div className="h-4 w-4 border border-primary border-t-transparent rounded-full animate-spin" />
             <span>Working...</span>
@@ -50,7 +68,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ) : (
           children
         )}
-      </button>
+      </Comp>
     );
   }
 );

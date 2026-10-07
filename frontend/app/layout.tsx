@@ -1,23 +1,6 @@
 import type { Metadata } from "next";
-import { Fraunces, DM_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "@/components/theme-provider";
-
-const _fraunces = Fraunces({
-  variable: "--font-display",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-});
-
-const _dmSans = DM_Sans({
-  variable: "--font-sans",
-  subsets: ["latin"],
-});
-
-const _jetBrainsMono = JetBrains_Mono({
-  variable: "--font-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Sketchpad - Draw it out together",
@@ -32,9 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning className="font-serif scroll-smooth">
       <body className="font-sans min-h-full flex flex-col bg-background text-foreground">
-        <ThemeProvider>
-          {children}
-        </ThemeProvider>
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );
