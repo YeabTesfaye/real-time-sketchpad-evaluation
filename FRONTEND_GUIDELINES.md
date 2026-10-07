@@ -26,9 +26,6 @@ Build UI that looks intentionally designed by a human, not generated. Favor rest
 2. **Tokens before components.** Define colors, type scale, spacing scale, radii, shadows, and motion tokens in one place (Tailwind v4 `@theme` plus shadcn CSS variables). Components consume tokens only, never raw values.
 3. **Install and restyle primitives, then compose.** Add the shadcn components needed, restyle to the direction, then build sections, then pages. Reuse before creating.
 4. **Verify visually after each step**, then report what you checked and what you found.
-## Process
-- For the first build of a page, do not stop to ask. Read the Design Direction in the prompt, commit to it, build tokens, header, sections, footer in one pass, then verify with Playwright and report.
-- Stop for approval only before adding a non-shadcn dependency or doing a refactor.
 
 ## Anti-"AI look" rules
 - No default purple-to-blue gradients, glassmorphism everywhere, or gradient text on headings.
@@ -64,7 +61,7 @@ After each step:
 3. Tab through the page and confirm focus order and focus rings. Open every dialog, menu, and popover and check its states.
 4. Check the console for errors and the page for layout shift or overflow.
 5. Fix issues, re-screenshot, then report. Delete temporary screenshots and keep `.playwright-mcp` in `.gitignore`.
-Playwright is token-heavy: use targeted screenshots, not full-page captures on every change.
+6. Playwright is token-heavy: use targeted screenshots, not full-page captures on every change.
 
 ## Code standards
 - TypeScript strict, no `any`, functional components, server components by default in Next.js (mark `"use client"` only where shadcn interactivity needs it).
@@ -74,24 +71,3 @@ Playwright is token-heavy: use targeted screenshots, not full-page captures on e
 ## Output rules
 - Be concise. Show diffs, not full file dumps.
 - If a design decision is subjective, give me 2 options with a recommendation instead of asking open-ended questions.
-
-
-## Next.js rules (hard rules, never break)
-- Never use `window.location`, `window.location.href`, or `location.assign` for navigation. It forces a full page reload.
-  - Client navigation: `useRouter` from `next/navigation` and `router.push()`.
-  - Links: `<Link href>` from `next/link`. Anything that only navigates is a Link, not a button with onClick.
-  - Server-side: `redirect()` from `next/navigation`.
-- App Router only. Pages are server components. Extract the smallest interactive piece into its own `'use client'` component (e.g. `RoomActions`), never mark a whole page as client.
-- Shared chrome (header, footer) lives in `app/layout.tsx` or a `components/site-header.tsx` imported there. Every page has a header and footer.
-- Fonts via `next/font` with CSS variables wired into the theme. No `<link>` tags.
-- Generate IDs with `crypto.getRandomValues` or `nanoid`, never `Math.random()`.
-- Do not set state right before navigating away.
-- Use `metadata` export for title and description.
-- Escape apostrophes in JSX (`&apos;`) or use `{"'"}`.
-- No Tailwind arbitrary classes containing quotes, spaces, or data URIs. Put those in CSS.
-- Run `tsc --noEmit` and `next lint` before reporting done.
-
-## Layout requirements (every page)
-- Sticky header: logo mark + wordmark left, 3 nav links, primary CTA right, mobile menu via shadcn Sheet.
-- Footer with real links.
-- Container: max-w-6xl, consistent horizontal padding.

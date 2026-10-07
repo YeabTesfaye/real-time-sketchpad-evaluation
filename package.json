@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "A real-time collaborative sketchpad built with Next.js and FastAPI",
+  "workspaces": [
+    "frontend"
+  ],
   "scripts": {
-    "dev": "concurrently \"npm run dev -w frontend\" \"uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000\"",
+    "dev": "concurrently \"npm run dev -w frontend\" \"c:/Users/yeab/.cache/pre-commit/repotq4z2nud/py_env-python3/Scripts/uvicorn.exe backend.main:app --reload --host 0.0.0.0 --port 8000\"",
     "dev:frontend": "npm run dev -w frontend",
-    "dev:backend": "uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:backend": "c:/Users/yeab/.cache/pre-commit/repotq4z2nud/py_env-python3/Scripts/uvicorn.exe backend.main:app --reload --host 0.0.0.0 --port 8000",
     "build": "npm run build -w frontend",
     "start": "npm run start -w frontend",
     "lint": "npm run lint -w frontend"
