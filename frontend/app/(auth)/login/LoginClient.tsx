@@ -36,6 +36,17 @@ export default function LoginClient() {
   const visibleError = (f: Field) => (submitted || touched[f] ? errors[f] : undefined);
   const markTouched = (f: Field) => () => setTouched((t) => ({ ...t, [f]: true }));
 
+  // Compute color from user ID (same formula as backend)
+  const computeColor = (userId: string): string => {
+    let hash = 0;
+    for (let i = 0; i < userId.length; i++) {
+      hash = userId.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    let hue = hash % 360;
+    if (hue < 0) hue += 360;
+    return `hsl(${hue}, 70%, 50%)`;
+  };
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitted(true);
@@ -50,12 +61,46 @@ export default function LoginClient() {
 
     setLoading(true);
     try {
-      // Frontend-only: simulate the request
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      localStorage.setItem("sketchpad_token", "demo-token");
-      router.push("/");
-    } catch {
-      setFormError("We couldn't log you in. Check your details and try again.");
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ username: email, password: password }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || 'Login failed');
+      }
+
+      const data = await res.json();
+      localStorage.setItem('sketchpad_token', data.access_token);
+
+      // Fetch user info
+      const userRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${data.access_token}`,
+        },
+      });
+
+      if (!userRes.ok) {
+        const userErrorData = await userRes.json();
+        throw new Error(userErrorData.detail || 'Failed to fetch user info');
+      }
+
+      const userData = await userRes.json();
+      // Add color to user data and ensure name is not empty
+      const userWithColor = {
+        ...userData,
+        color: computeColor(userData.id),
+        name: `${userData.firstname || ''} ${userData.lastname || ''}`.trim() || `User-${String(userData.id).slice(0, 4)}`
+      };
+      localStorage.setItem('sketchpad_user', JSON.stringify(userWithColor));
+
+      router.push('/');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      setFormError(message);
+    } finally {
       setLoading(false);
     }
   }

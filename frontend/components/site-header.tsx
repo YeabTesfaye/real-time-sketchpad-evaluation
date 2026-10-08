@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Menu, PencilLine, Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,11 +16,21 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/hooks/useAuth";
+import { Avatar } from "@/components/ui/avatar";
 
 const NAV_LINKS = [
   { href: "/#how-it-works", label: "How it works" },
   { href: "/#features", label: "Features" },
 ];
+
+type HeaderUser = {
+  id: string;
+  email: string;
+  firstname: string | null;
+  lastname: string | null;
+  avatar_url: string | null;
+} | null;
 
 // Declared at module level so component identity is stable across renders
 function ThemeToggle() {
@@ -35,34 +45,47 @@ function ThemeToggle() {
       onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
     >
       {/* Both icons render, CSS picks one, so there is no hydration mismatch */}
-      <Sun className="hidden h-4 w-4 dark:block" />
-      <Moon className="h-4 w-4 dark:hidden" />
+      <Sun className=" h-4 w-4 dark:block" />
+      <Moon className=" h-4 w-4 dark:hidden" />
     </Button>
   );
 }
 
-function AuthActions() {
-  return (
-    <>
-      <Button
-        asChild
-        variant="ghost"
-        className="h-9 border-transparent px-3 text-muted-foreground hover:bg-secondary hover:text-foreground"
-      >
-        <Link href="/login">Log in</Link>
-      </Button>
-      <Button asChild className="h-9 px-4 shadow-sm">
-        <Link href="/signup">Sign up</Link>
-      </Button>
-    </>
-  );
+function AuthActions({ user }: { user: HeaderUser }) {
+  if (!user) {
+    return (
+      <>
+        <Button
+          asChild
+          variant="ghost"
+          className="h-9 border-transparent px-3 text-muted-foreground hover:bg-secondary hover:text-foreground"
+        >
+          <Link href="/login">Log in</Link>
+        </Button>
+        <Button asChild className="h-9 px-4 shadow-sm">
+          <Link href="/signup">Sign up</Link>
+        </Button>
+      </>
+    );
+  }
+
+  return <Avatar user={user} size={36} className="h-9 w-9" />;
 }
 
 export default function SiteHeader() {
   const pathname = usePathname();
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+  const { user } = useAuth();
+
+  // Redirect authenticated users away from auth pages
+  useEffect(() => {
+    if (user && (pathname === "/login" || pathname === "/signup")) {
+      router.replace("/");
+    }
+  }, [user, pathname, router]);
 
   // Passive scroll listener for the border/shadow state
   useEffect(() => {
@@ -137,7 +160,7 @@ export default function SiteHeader() {
         {/* Right: pushed to the far edge */}
         <div className="ml-auto flex items-center gap-1.5">
           <div className="hidden items-center gap-1.5 md:flex">
-            <AuthActions />
+            <AuthActions user={user} />
           </div>
 
           <div className="mx-2 hidden h-5 w-px bg-border md:block" aria-hidden="true" />
@@ -190,14 +213,16 @@ export default function SiteHeader() {
                   ))}
                 </nav>
 
-                <SheetFooter className="flex-col gap-2 border-t border-border p-4 sm:flex-col sm:space-x-0">
-                  <Button asChild variant="outline" className="h-11 w-full">
-                    <Link href="/login" onClick={closeMenu}>Log in</Link>
-                  </Button>
-                  <Button asChild className="h-11 w-full">
-                    <Link href="/signup" onClick={closeMenu}>Sign up</Link>
-                  </Button>
-                </SheetFooter>
+                {!user && (
+                  <SheetFooter className="flex-col gap-2 border-t border-border p-4 sm:flex-col sm:space-x-0">
+                    <Button asChild variant="outline" className="h-11 w-full">
+                      <Link href="/login" onClick={closeMenu}>Log in</Link>
+                    </Button>
+                    <Button asChild className="h-11 w-full">
+                      <Link href="/signup" onClick={closeMenu}>Sign up</Link>
+                    </Button>
+                  </SheetFooter>
+                )}
               </SheetContent>
             </Sheet>
           </div>

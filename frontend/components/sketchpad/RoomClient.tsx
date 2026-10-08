@@ -13,8 +13,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { SketchpadCanvas } from '@/components/sketchpad/Canvas';
-import { PeoplePanel, ToolPanel, type Identity } from '@/components/sketchpad/panels';
-import { RoomUtils } from '@/lib/room';
+import { PeoplePanel, ToolPanel } from '@/components/sketchpad/panels';
 import { createRoomCode, roomHref } from '@/lib/room-code';
 import { cn } from '@/lib/utils';
 
@@ -43,15 +42,6 @@ function useMediaQuery(query: string) {
     [query]
   );
   return useSyncExternalStore(subscribe, () => window.matchMedia(query).matches, () => false);
-}
-
-function createIdentity(): Identity {
-  const id = RoomUtils.generateUserId();
-  return {
-    id,
-    name: RoomUtils.generateUserName(id),
-    color: RoomUtils.generateUserColor(id),
-  };
 }
 
 /* ---------- pieces ---------- */
@@ -139,7 +129,19 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
   const isDesktop = useMediaQuery('(min-width: 1024px)');
 
   // Lazy initializer runs once, only on the client (see the gate below)
-  const [user] = useState(createIdentity);
+  const getUserFromStorage = () => {
+    const userJson = localStorage.getItem('sketchpad_user');
+    if (userJson) {
+      return JSON.parse(userJson);
+    }
+    // Fallback (should not happen if logged in)
+    return {
+      id: 'guest-' + Math.random().toString(36).substr(2, 9),
+      name: 'Guest',
+      color: '#888888'
+    };
+  };
+  const [user] = useState(getUserFromStorage);
   const [color, setColor] = useState(user.color);
   const [size, setSize] = useState(2);
 
@@ -200,7 +202,7 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
           <div className="m-auto p-4 lg:p-6">
             {/* Paper stays light in both themes so stroke colors read the same everywhere.
                 The [&_p] rules tidy the status lines Canvas prints under itself. */}
-            <div className="w-fit overflow-hidden rounded-xl border bg-[#fbfaf7] text-neutral-900 shadow-md [&_canvas]:block [&_p]:border-t [&_p]:border-neutral-200 [&_p]:px-3 [&_p]:py-1.5 [&_p]:text-xs [&_p]:text-neutral-500">
+            <div className="w-fit overflow-hidden rounded-xl border bg-[#fbfaf7] shadow-md [&_canvas]:block [&_p]:border-t [&_p]:border-neutral-200 [&_p]:px-3 [&_p]:py-1.5 [&_p]:text-xs [&_p]:text-neutral-500">
               <SketchpadCanvas
                 width={800}
                 height={600}

@@ -19,7 +19,8 @@ class AuthService:
         user = User(
             email=user_in.email,
             hashed_password=hashed_password,
-            full_name=user_in.full_name,
+            firstname=user_in.firstname,
+            lastname=user_in.lastname,
         )
         self.db.add(user)
         self.db.commit()

@@ -159,8 +159,8 @@ export function SketchpadCanvas({ width, height, roomId, userId, currentColor, c
         color: currentColor,
         size: currentSize,
         tool: 'pen',
-        userId: userId,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        userId
       }
     ]);
   }, [currentColor, currentSize, userId]);
@@ -200,8 +200,7 @@ export function SketchpadCanvas({ width, height, roomId, userId, currentColor, c
 
     // Create operation to send
     const operationToSend: DrawingOperation = {
-      ...lastOp,
-      userId: userId
+      ...lastOp
     };
 
     webSocketSendMessage({
@@ -210,7 +209,7 @@ export function SketchpadCanvas({ width, height, roomId, userId, currentColor, c
         ...operationToSend
       }
     });
-  }, [webSocketSendMessage, userId]);
+  }, [webSocketSendMessage]);
 
   const handlePointerUp = useCallback(() => {
     setIsDrawing(false);
@@ -219,17 +218,6 @@ export function SketchpadCanvas({ width, height, roomId, userId, currentColor, c
     sendDrawingOperation();
   }, []);
 
-  // Clear canvas
-  const handleClearCanvas = useCallback(() => {
-    setLocalOperations([]);
-    setRemoteOperations([]);
-    setRemoteCursors({}); // Clear remote cursors too
-    webSocketSendMessage({
-      type: 'clear_canvas',
-      userId,
-      timestamp: new Date().toISOString()
-    });
-  }, [webSocketSendMessage, userId]);
 
   // Set up pointer event listeners
   useEffect(() => {

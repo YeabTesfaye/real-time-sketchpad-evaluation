@@ -1,28 +1,19 @@
-from pydantic_settings import BaseSettings
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = Field(
-        default="sqlite:///./sketchpad.db",
-        env="DATABASE_URL"
-    )
-    SECRET_KEY: str = Field(
-        default="your-super-secret-jwt-secret-key-change-this-in-production",
-        env="SECRET_KEY"
-    )
-    ALGORITHM: str = Field(default="HS256", env="ALGORITHM")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
-        default=1440,  # 24 hours
-        env="ACCESS_TOKEN_EXPIRE_MINUTES"
-    )
-    FRONTEND_URL: str = Field(
-        default="http://localhost:3000",
-        env="FRONTEND_URL"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",  # don't crash on unrelated vars in .env
     )
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    DATABASE_URL: str = "sqlite:///./sketchpad.db"
+    SECRET_KEY: str = "your-super-secret-jwt-secret-key-change-this-in-production"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
+    FRONTEND_URL: str = "http://localhost:3000"
+
 
 settings = Settings()

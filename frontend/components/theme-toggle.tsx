@@ -18,7 +18,7 @@ export default function ThemeToggle({ className }: { className?: string }) {
       onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
     >
       {/* Both icons render, CSS picks one, so there is no hydration mismatch */}
-      <Sun className="hidden h-4.5 w-4.5 dark:block" aria-hidden="true" />
+      <Sun className=" h-4.5 w-4.5 dark:block" aria-hidden="true" />
       <Moon className="h-4.5 w-4.5 dark:hidden" aria-hidden="true" />
     </Button>
   );
