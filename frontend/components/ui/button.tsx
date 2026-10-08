@@ -9,18 +9,20 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default:
-          "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-md active:bg-primary/80",
-        destructive:
-          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 active:bg-destructive/80",
-        outline:
-          "border-border bg-card text-foreground hover:border-foreground/30 hover:bg-secondary active:bg-secondary/70",
-        secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/70 active:bg-secondary/50",
-        ghost:
-          "text-muted-foreground hover:bg-secondary hover:text-foreground active:bg-secondary/70",
-        link: "text-primary underline-offset-4 hover:underline",
-      },
+  // Darken on hover (lighten in dark mode) instead of fading, so the change is obvious
+      default:
+        "bg-primary text-primary-foreground shadow-sm hover:shadow-md hover:brightness-90 active:brightness-75 dark:hover:brightness-110 dark:active:brightness-125",
+      destructive:
+        "bg-destructive text-destructive-foreground shadow-sm hover:shadow-md hover:brightness-90 active:brightness-75 dark:hover:brightness-110 dark:active:brightness-125",
+      outline:
+        "border-border bg-card text-foreground hover:border-foreground/30 hover:bg-secondary hover:shadow-sm active:bg-secondary/70",
+      secondary:
+        "bg-secondary text-secondary-foreground hover:bg-foreground/10 active:bg-foreground/15",
+      // A foreground tint works on any surface, including ones that are already secondary
+      ghost:
+        "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground active:bg-foreground/10",
+      link: "text-primary underline-offset-4 hover:underline",
+},
       size: {
         default: "h-10 px-4 py-2",
         sm: "h-9 px-3",

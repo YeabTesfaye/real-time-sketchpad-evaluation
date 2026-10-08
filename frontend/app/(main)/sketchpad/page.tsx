@@ -1,152 +1,81 @@
-'use client';
+import type { Metadata } from "next";
+import { Check } from "lucide-react";
+import { StartRoomButton } from "@/components/room-actions";
+import JoinRoomForm from "@/components/join-room-form";
+import { CONTAINER } from "@/lib/layout";
+import { ROOM_CODE_LENGTH } from "@/lib/room-code";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { SketchpadCanvas } from '@/components/sketchpad/Canvas';
-import { SketchpadToolbar } from '@/components/sketchpad/Toolbar';
-import { SketchpadUserList } from '@/components/sketchpad/UserList';
-import { SketchpadRoomControls } from '@/components/sketchpad/RoomControls';
-import { OperationUtils } from '@/lib/operations';
-import { RoomUtils } from '@/lib/room';
-import RoomActions from '@/components/room-actions';
+export const metadata: Metadata = {
+  title: "Start or join a room - Sketchpad",
+  description: "Open a new Sketchpad room or join one with an 8-character code.",
+};
 
-export default function SketchpadRoomPage({
-  params: { roomId }
-}: {
-  params: {
-    roomId: string
-  }
-}) {
-  // Ref to hold initialization values (initialized only once)
-  const initRef = useRef<{ userId: string; userName: string; userColor: string } | null>(null);
+const POINTS = [
+  "Live cursors and strokes for everyone in the room",
+  `Share a room with one ${ROOM_CODE_LENGTH}-character code`,
+  "Works on any device, nothing to install",
+];
 
-  // Initialize values on first render
-  if (initRef.current === null) {
-    const userId = RoomUtils.generateUserId();
-    const userName = RoomUtils.generateUserName(userId);
-    const userColor = RoomUtils.generateUserColor(userId);
-    initRef.current = { userId, userName, userColor };
-  }
+export default function SketchpadPage() {
+  return (
+    <main className="flex min-h-[calc(100dvh-4rem)] items-center">
+      <div
+        className={`${CONTAINER} grid items-center gap-12 py-14 lg:grid-cols-[1fr_minmax(0,30rem)] lg:gap-20 xl:gap-32`}
+      >
+        {/* Copy */}
+        <div className="space-y-8">
+          <div className="inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
+            <span className="h-2 w-2 rounded-full bg-primary" aria-hidden="true" />
+            Real-time rooms
+          </div>
 
-  // Generate user data once for initialization
-  const userId = RoomUtils.generateUserId();
-  const userName = RoomUtils.generateUserName(userId);
-  const userColor = RoomUtils.generateUserColor(userId);
+          <h1 className="font-serif text-5xl font-semibold leading-[1.04] tracking-tight text-foreground sm:text-6xl xl:text-7xl">
+            Start a room, or <span className="text-primary">join one.</span>
+          </h1>
 
-  const [user, setUser] = useState<{ id: string; name: string } | null>(() => {
-    return { id: userId, name: userName };
-  });
-  const [currentColor, setCurrentColor] = useState(userColor);
-  const [currentSize, setCurrentSize] = useState(2);
-  const [isRoomCreated, setIsRoomCreated] = useState(false);
+          <p className="max-w-xl text-lg leading-relaxed text-muted-foreground">
+            Open a fresh canvas and send the code, or enter the code a teammate shared with you.
+          </p>
 
-  // Handle creating a new room
-  const handleCreateRoom = useCallback(() => {
-    // In a real app, this would navigate to a new room
-    // For now, we'll just simulate by setting a flag
-    setIsRoomCreated(true);
-  }, []);
+          <ul className="space-y-3">
+            {POINTS.map((point) => (
+              <li key={point} className="flex items-start gap-3 text-muted-foreground">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <Check className="h-3 w-3" aria-hidden="true" />
+                </span>
+                {point}
+              </li>
+            ))}
+          </ul>
+        </div>
 
-  // Handle joining a room
-  const handleJoinRoom = useCallback((roomId: string) => {
-    // In a real app, this would navigate to the specified room
-    // For now, we'll just simulate by setting a flag
-    setIsRoomCreated(true);
-  }, []);
+        {/* Actions */}
+        <div className="w-full rounded-2xl border bg-card p-6 shadow-lg sm:p-8">
+          <div className="space-y-6">
+            <section className="space-y-3">
+              <h2 className="font-serif text-xl font-semibold text-foreground">Start a new room</h2>
+              <p className="text-sm text-muted-foreground">
+                Get a blank canvas and a code to share.
+              </p>
+              <StartRoomButton className="h-12 w-full gap-2 text-base" />
+            </section>
 
-  // Handle clearing canvas
-  const handleClearCanvas = useCallback(() => {
-    // Canvas clearing is handled within the Canvas component
-  }, []);
+            <div className="flex items-center gap-3 text-xs uppercase tracking-wider text-muted-foreground">
+              <span className="h-px flex-1 bg-border" aria-hidden="true" />
+              or
+              <span className="h-px flex-1 bg-border" aria-hidden="true" />
+            </div>
 
-  // If we don't have a room ID yet, show room creation UI
-  if (!roomId || roomId === 'undefined') {
-    return (
-      <div className="min-h-[calc(100dvh-4rem)] flex w-full flex-col items-center justify-center bg-background">
-        <div className="w-full max-w-xl space-y-6">
-          <RoomActions />
+            <section className="space-y-3">
+              <h2 className="font-serif text-xl font-semibold text-foreground">Join with a code</h2>
+              <p className="text-sm text-muted-foreground">
+                Enter the {ROOM_CODE_LENGTH}-character code you were given.
+              </p>
+              <JoinRoomForm />
+            </section>
+          </div>
         </div>
       </div>
-    );
-  }
-
-  // Main sketchpad interface
-  return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
-      <header className="bg-white shadow-md">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-gray-800">
-            Real-time Collaborative Sketchpad
-          </h1>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-sm">
-              <div className="h-3 w-3 rounded-full" style={{backgroundColor: user ? RoomUtils.generateUserColor(user.id) : '#000000'}}></div>
-              <span>{user?.name}</span>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 flex overflow-hidden">
-        {/* Left sidebar - Tools */}
-        <aside className="w-64 bg-white border-r border-gray-200">
-          <SketchpadToolbar
-            onColorChange={setCurrentColor}
-            onSizeChange={setCurrentSize}
-            onClearCanvas={handleClearCanvas}
-            currentColor={currentColor}
-            currentSize={currentSize}
-          />
-        </aside>
-
-        {/* Main canvas area */}
-        <section className="flex-1 flex flex-col overflow-hidden">
-          {user ? (
-            <div className="flex-1 overflow-hidden">
-              <SketchpadCanvas
-                width={800}
-                height={600}
-                roomId={roomId}
-                userId={user?.id}
-                currentColor={currentColor}
-                currentSize={currentSize}
-              />
-            </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center bg-gray-50">
-              <div className="text-center py-8">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                <p className="mt-4 text-gray-600">Initializing...</p>
-              </div>
-            </div>
-          )}
-
-          {/* Connection status bar */}
-          <div className="bg-gray-50 px-4 py-2 text-xs text-gray-500 border-t border-gray-200">
-            Connected • Room: {roomId} • {user?.name}
-          </div>
-        </section>
-
-        {/* Right sidebar - Users and room controls */}
-        <aside className="w-64 bg-white border-l border-gray-200">
-          <div className="flex flex-col h-full">
-            <SketchpadUserList roomId={roomId} />
-            <div className="flex-1"></div>
-            <SketchpadRoomControls
-              roomId={roomId}
-              onCreateRoom={handleCreateRoom}
-              onJoinRoom={handleJoinRoom}
-            />
-          </div>
-        </aside>
-      </main>
-
-      <footer className="bg-white shadow-md">
-        <div className="max-w-7xl mx-auto px-4 py-4 text-center text-sm text-gray-500">
-          &copy; {new Date().getFullYear()} Real-time Collaborative Sketchpad •
-          <a href="#" className="text-blue-600 hover:text-blue-800">Privacy</a> •
-          <a href="#" className="text-blue-600 hover:text-blue-800">Terms</a>
-        </div>
-      </footer>
-    </div>
+    </main>
   );
 }
