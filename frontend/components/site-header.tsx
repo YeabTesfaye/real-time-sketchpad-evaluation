@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useTheme } from "next-themes";
-import { Menu, PencilLine, Moon, Sun } from "lucide-react";
+import { Menu, PencilLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -15,6 +14,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import ThemeToggle from "@/components/theme-toggle";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { Avatar } from "@/components/ui/avatar";
@@ -23,6 +23,7 @@ const NAV_LINKS = [
   { href: "/#how-it-works", label: "How it works" },
   { href: "/#features", label: "Features" },
 ];
+
 
 type HeaderUser = {
   id: string;
@@ -33,25 +34,9 @@ type HeaderUser = {
 } | null;
 
 // Declared at module level so component identity is stable across renders
-function ThemeToggle() {
-  const { resolvedTheme, setTheme } = useTheme();
-
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="h-9 w-9 border-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
-      aria-label="Toggle theme"
-      onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-    >
-      {/* Both icons render, CSS picks one, so there is no hydration mismatch */}
-      <Sun className=" h-4 w-4 dark:block" />
-      <Moon className=" h-4 w-4 dark:hidden" />
-    </Button>
-  );
-}
-
 function AuthActions({ user }: { user: HeaderUser }) {
+  const router = useRouter();
+
   if (!user) {
     return (
       <>
@@ -69,7 +54,24 @@ function AuthActions({ user }: { user: HeaderUser }) {
     );
   }
 
-  return <Avatar user={user} size={36} className="h-9 w-9" />;
+  const handleLogout = () => {
+    localStorage.removeItem('sketchpad_token');
+    localStorage.removeItem('sketchpad_user');
+    router.replace('/login');
+  };
+
+  return (
+    // A real button gives you Enter and Space handling for free
+    <button
+      type="button"
+      onClick={handleLogout}
+      title="Log out"
+      aria-label="Log out"
+      className="cursor-pointer rounded-full transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    >
+      <Avatar user={user} size={36} className="h-9 w-9" />
+    </button>
+  );
 }
 
 export default function SiteHeader() {
@@ -120,6 +122,28 @@ export default function SiteHeader() {
   const isSectionActive = (href: string) =>
     pathname === "/" && activeSectionId === href.split("#")[1];
 
+  // Helper function to create nav links (DRY principle)
+  const createNavLinks = (onClick?: () => void) => {
+    return NAV_LINKS.map((link) => {
+      const isActive = isSectionActive(link.href);
+
+      return (
+        <Link
+          key={link.href}
+          href={link.href}
+          onClick={onClick}
+          aria-current={isActive ? "location" : undefined}
+          className={cn(
+            "flex h-11 items-center rounded-md px-3 text-base transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            isActive && "bg-secondary text-foreground"
+          )}
+        >
+          {link.label}
+        </Link>
+      );
+    });
+  };
+
   return (
     <header
       className={cn(
@@ -139,22 +163,7 @@ export default function SiteHeader() {
 
         {/* Nav sits next to the logo instead of floating in the middle */}
         <nav className="hidden items-center gap-1 md:flex" aria-label="Main">
-          {NAV_LINKS.map((link) => {
-            const isActive = isSectionActive(link.href);
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                aria-current={isActive ? "location" : undefined}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  isActive && "bg-secondary text-foreground"
-                )}
-              >
-                {link.label}
-              </Link>
-            );
-          })}
+          {createNavLinks()}
         </nav>
 
         {/* Right: pushed to the far edge */}
@@ -198,19 +207,7 @@ export default function SiteHeader() {
                   >
                     Home
                   </Link>
-                  {NAV_LINKS.map((link) => (
-                    <Link
-                      key={link.href}
-                      href={link.href}
-                      onClick={closeMenu}
-                      className={cn(
-                        "flex h-11 items-center rounded-md px-3 text-base transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        isSectionActive(link.href) && "bg-secondary text-foreground"
-                      )}
-                    >
-                      {link.label}
-                    </Link>
-                  ))}
+                  {createNavLinks(closeMenu)}
                 </nav>
 
                 {!user && (
