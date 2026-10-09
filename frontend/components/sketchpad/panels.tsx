@@ -4,10 +4,18 @@ import { LogOut, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SketchpadUserList } from '@/components/sketchpad/UserList';
 import { cn } from '@/lib/utils';
+import type { Tool } from '@/lib/operations';
 
 export type Identity = { id: string; name: string; color: string };
 
 const PRESET_COLORS = ['#1c1917', '#dc2f1d', '#ea8a1f', '#2f9e5e', '#2563eb', '#7c3aed', '#db2777'];
+
+const TOOLS: { id: Tool; icon: string }[] = [
+  { id: 'pen', icon: '✏️' },
+  { id: 'rectangle', icon: '■' },
+  { id: 'ellipse', icon: '●' },
+  { id: 'line', icon: '↔️' },
+];
 
 const sameColor = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -37,18 +45,35 @@ type ToolPanelProps = {
   userColor: string;
   color: string;
   size: number;
+  currentTool: Tool;
   onColorChange: (color: string) => void;
   onSizeChange: (size: number) => void;
   onClear: () => void;
+  onToolChange: (tool: Tool) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 };
 
-export function ToolPanel({ userColor, color, size, onColorChange, onSizeChange, onClear }: ToolPanelProps) {
+export function ToolPanel({
+  userColor,
+  color,
+  size,
+  currentTool,
+  onColorChange,
+  onSizeChange,
+  onClear,
+  onToolChange,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+}: ToolPanelProps) {
   const [confirming, setConfirming] = useState(false);
 
   // Your identity color first, then the presets (minus duplicates)
   const swatches = [userColor, ...PRESET_COLORS.filter((c) => !sameColor(c, userColor))];
-  // Native color inputs only accept #rrggbb
-  const pickerValue = /^#[0-9a-f]{6}$/i.test(color) ? color : '#000000';
 
   return (
     <div className="flex flex-col gap-6 p-4">
@@ -73,20 +98,6 @@ export function ToolPanel({ userColor, color, size, onColorChange, onSizeChange,
               />
             );
           })}
-
-          <label
-            title="Custom color"
-            className="relative flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-dashed border-muted-foreground/50 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground focus-within:ring-2 focus-within:ring-ring"
-          >
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            <input
-              type="color"
-              value={pickerValue}
-              onChange={(e) => onColorChange(e.target.value)}
-              aria-label="Custom color"
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            />
-          </label>
         </div>
       </PanelSection>
 
@@ -106,6 +117,31 @@ export function ToolPanel({ userColor, color, size, onColorChange, onSizeChange,
           aria-hidden="true"
         >
           <span className="rounded-full" style={{ width: size, height: size, backgroundColor: color }} />
+        </div>
+      </PanelSection>
+
+      <PanelSection title="Tool">
+        <div className="flex flex-wrap gap-2">
+          {TOOLS.map(({ id, icon }) => {
+            const active = currentTool === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onToolChange(id)}
+                aria-label={id}
+                aria-pressed={active}
+                title={id}
+                className={cn(
+                  'h-8 w-8 rounded-full border border-black/10 transition-transform hover:scale-110',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card',
+                  active && 'ring-2 ring-foreground ring-offset-2 ring-offset-card'
+                )}
+              >
+                <span aria-hidden="true">{icon}</span>
+              </button>
+            );
+          })}
         </div>
       </PanelSection>
 
@@ -140,6 +176,17 @@ export function ToolPanel({ userColor, color, size, onColorChange, onSizeChange,
             Clear canvas
           </Button>
         )}
+      </PanelSection>
+
+      <PanelSection title="History">
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="flex-1" onClick={onUndo} disabled={!canUndo}>
+            ↶ Undo
+          </Button>
+          <Button variant="outline" size="sm" className="flex-1" onClick={onRedo} disabled={!canRedo}>
+            Redo ↷
+          </Button>
+        </div>
       </PanelSection>
     </div>
   );

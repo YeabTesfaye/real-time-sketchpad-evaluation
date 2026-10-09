@@ -1,8 +1,20 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { DrawingOperation, OperationUtils } from '@/lib/operations';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { DrawingOperation, OperationUtils, Tool } from '@/lib/operations';
 import { useWebSocket } from '@/lib/websocket';
+
+export interface HistoryState {
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+// This is what the parent's ref points to. It replaces HTMLCanvasElement, which caused TS2740.
+export interface SketchpadCanvasHandle {
+  undo: () => void;
+  redo: () => void;
+  clear: () => void;
+}
 
 interface CanvasProps {
   width: number;
@@ -11,285 +23,314 @@ interface CanvasProps {
   userId: string;
   currentColor: string;
   currentSize: number;
+  currentTool: Tool;
+  onHistoryChange?: (state: HistoryState) => void;
 }
 
-export function SketchpadCanvas({ width, height, roomId, userId, currentColor, currentSize }: CanvasProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [localOperations, setLocalOperations] = useState<DrawingOperation[]>([]);
-  const [remoteOperations, setRemoteOperations] = useState<DrawingOperation[]>([]);
-  const [remoteCursors, setRemoteCursors] = useState<Record<string, {x: number, y: number, color: string, name: string, timestamp: number}>>({});
-  const [isDrawing, setIsDrawing] = useState(false);
-  const { sendMessage: webSocketSendMessage, messages, connectionStatus, error } = useWebSocket(roomId);
+type RemoteCursor = { x?: number; y?: number; color?: string; name?: string; timestamp: number };
 
-  // Process incoming WebSocket messages
-  useEffect(() => {
-    messages.forEach(message => {
-      if (message.type === 'drawing_operation') {
-        const operation = OperationUtils.deserializeOperation(message);
-        if (operation) {
-          setRemoteOperations(prev => [...prev, operation]);
-        }
-      } else if (message.type === 'cursor_move' && message.userId !== userId) {
-        // Handle cursor position updates from other users
-        const cursorData = OperationUtils.deserializeCursorPosition(message);
-        if (cursorData) {
-          setRemoteCursors(prev => ({
-            ...prev,
-            [cursorData.userId]: {
-              ...(prev[cursorData.userId] || {}),
-              x: cursorData.position.x,
-              y: cursorData.position.y,
-              timestamp: Date.now()
-            }
-          }));
-        }
-      } else if (message.type === 'user_joined') {
-        // Handle new user joining - store their color and name
-        if (message.user) {
-          setRemoteCursors(prev => ({
-            ...prev,
-            [message.user.userId]: {
-              ...(prev[message.user.userId] || {}),
-              color: message.user.color,
-              name: message.user.name,
-              timestamp: Date.now()
-            }
-          }));
-        }
-      } else if (message.type === 'user_left') {
-        // Handle user leaving - remove them from cursors
-        if (message.userId) {
-          setRemoteCursors(prev => {
-            const { [message.userId]: removed, ...rest } = prev;
-            return rest;
-          });
-        }
-      } else if (message.type === 'clear_canvas') {
-        // Handle clear canvas command
-        setRemoteOperations([]);
-        setLocalOperations([]);
-        setRemoteCursors({}); // Clear remote cursors too
+function drawOperation(ctx: CanvasRenderingContext2D, op: DrawingOperation) {
+  const pts = op.points;
+  if (pts.length === 0) return;
+
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+
+  ctx.strokeStyle = op.color;
+  ctx.fillStyle = op.color;
+  ctx.lineWidth = op.size;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  switch (op.tool) {
+    case 'rectangle':
+      ctx.beginPath();
+      ctx.rect(a.x, a.y, b.x - a.x, b.y - a.y);
+      ctx.stroke();
+      break;
+    case 'ellipse':
+      ctx.beginPath();
+      ctx.ellipse(
+        (a.x + b.x) / 2,
+        (a.y + b.y) / 2,
+        Math.abs(b.x - a.x) / 2,
+        Math.abs(b.y - a.y) / 2,
+        0,
+        0,
+        Math.PI * 2
+      );
+      ctx.stroke();
+      break;
+    case 'line':
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      break;
+    default: {
+      // pen: a single point is a dot, otherwise a polyline
+      if (pts.length === 1) {
+        ctx.beginPath();
+        ctx.arc(a.x, a.y, op.size / 2, 0, Math.PI * 2);
+        ctx.fill();
+        break;
       }
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+    }
+  }
+}
+
+export const SketchpadCanvas = forwardRef<SketchpadCanvasHandle, CanvasProps>(function SketchpadCanvas(
+  { width, height, roomId, userId, currentColor, currentSize, currentTool, onHistoryChange },
+  ref
+) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Drawing state lives in refs so pointer handlers never read stale closures
+  const localOpsRef = useRef<DrawingOperation[]>([]);
+  const redoStackRef = useRef<DrawingOperation[]>([]);
+  const remoteOpsRef = useRef<DrawingOperation[]>([]);
+  const activeOpRef = useRef<DrawingOperation | null>(null);
+  const rafRef = useRef(0);
+  const processedRef = useRef(0);
+  const lastCursorSendRef = useRef(0);
+  const onHistoryChangeRef = useRef(onHistoryChange);
+
+  const [remoteCursors, setRemoteCursors] = useState<Record<string, RemoteCursor>>({});
+  const { sendMessage, messages, connectionStatus, error } = useWebSocket(roomId);
+
+  useEffect(() => {
+    onHistoryChangeRef.current = onHistoryChange;
+  });
+
+  const emitHistory = useCallback(() => {
+    onHistoryChangeRef.current?.({
+      canUndo: localOpsRef.current.length > 0,
+      canRedo: redoStackRef.current.length > 0,
     });
-  }, [messages, userId]);
+  }, []);
 
-  // Draw a single operation
-  const drawOperation = useCallback((ctx: CanvasRenderingContext2D, operation: DrawingOperation) => {
-    if (operation.points.length === 0) return;
+  const redraw = useCallback(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
 
-    ctx.beginPath();
-    ctx.moveTo(operation.points[0].x, operation.points[0].y);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const op of remoteOpsRef.current) drawOperation(ctx, op);
+    for (const op of localOpsRef.current) drawOperation(ctx, op);
+    if (activeOpRef.current) drawOperation(ctx, activeOpRef.current);
+  }, []);
 
-    for (let i = 1; i < operation.points.length; i++) {
-      ctx.lineTo(operation.points[i].x, operation.points[i].y);
+  const scheduleRedraw = useCallback(() => {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0;
+      redraw();
+    });
+  }, [redraw]);
+
+  // Changing the width/height attributes wipes the bitmap, so redraw after a resize
+  useEffect(() => {
+    redraw();
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
+    };
+  }, [width, height, redraw]);
+
+  // Handle only messages we have not processed yet (messages is append-only)
+  useEffect(() => {
+    if (messages.length < processedRef.current) processedRef.current = 0;
+    const fresh = messages.slice(processedRef.current);
+    processedRef.current = messages.length;
+    if (fresh.length === 0) return;
+
+    for (const message of fresh) {
+      switch (message.type) {
+        case 'drawing_operation': {
+          const operation = OperationUtils.deserializeOperation(message);
+          // Skip our own echo if the server broadcasts back to the sender
+          if (operation && operation.userId !== userId) remoteOpsRef.current.push(operation);
+          break;
+        }
+        case 'cursor_move': {
+          if (message.userId === userId) break;
+          const cursorData = OperationUtils.deserializeCursorPosition(message);
+          if (cursorData) {
+            setRemoteCursors(prev => ({
+              ...prev,
+              [cursorData.userId]: {
+                ...prev[cursorData.userId],
+                x: cursorData.position.x,
+                y: cursorData.position.y,
+                timestamp: Date.now(),
+              },
+            }));
+          }
+          break;
+        }
+        case 'user_joined': {
+          const { userId: joinedId, color, name } = message.user;
+          setRemoteCursors(prev => ({
+            ...prev,
+            [joinedId]: { ...prev[joinedId], color, name, timestamp: Date.now() },
+          }));
+          break;
+        }
+        case 'user_left': {
+          setRemoteCursors(prev => {
+            const next = { ...prev };
+            delete next[message.userId];
+            return next;
+          });
+          break;
+        }
+        case 'clear_canvas': {
+          remoteOpsRef.current = [];
+          localOpsRef.current = [];
+          redoStackRef.current = [];
+          activeOpRef.current = null;
+          setRemoteCursors({});
+          emitHistory();
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    scheduleRedraw();
+  }, [messages, userId, scheduleRedraw, emitHistory]);
+
+  const undo = useCallback(() => {
+    const op = localOpsRef.current.pop();
+    if (!op) return;
+    redoStackRef.current.push(op);
+    emitHistory();
+    scheduleRedraw();
+  }, [emitHistory, scheduleRedraw]);
+
+  const redo = useCallback(() => {
+    const op = redoStackRef.current.pop();
+    if (!op) return;
+    localOpsRef.current.push(op);
+    emitHistory();
+    scheduleRedraw();
+  }, [emitHistory, scheduleRedraw]);
+
+  const clear = useCallback(() => {
+    localOpsRef.current = [];
+    remoteOpsRef.current = [];
+    redoStackRef.current = [];
+    activeOpRef.current = null;
+    emitHistory();
+    scheduleRedraw();
+    // ClearCanvas requires a timestamp in your WebSocketMessage union
+    sendMessage({ type: 'clear_canvas', userId, timestamp: new Date().toISOString() });
+  }, [emitHistory, scheduleRedraw, sendMessage, userId]);
+
+  useImperativeHandle(ref, () => ({ undo, redo, clear }), [undo, redo, clear]);
+
+  // Map CSS pixels to canvas pixels so drawing stays correct if the canvas is ever scaled
+  const toPoint = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (width / rect.width),
+      y: (e.clientY - rect.top) * (height / rect.height),
+    };
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+
+    activeOpRef.current = {
+      points: [toPoint(e)],
+      color: currentColor,
+      size: currentSize,
+      tool: currentTool,
+      timestamp: new Date().toISOString(),
+      userId,
+    };
+    scheduleRedraw();
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const p = toPoint(e);
+    const op = activeOpRef.current;
+
+    if (op) {
+      if (op.tool === 'pen') op.points.push(p);
+      else op.points = [op.points[0], p]; // shapes: start point plus current point
+      scheduleRedraw();
     }
 
-    ctx.strokeStyle = operation.color;
-    ctx.lineWidth = operation.size;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-  }, []);
+    // Throttle presence updates to roughly 30 per second
+    const now = performance.now();
+    if (now - lastCursorSendRef.current > 33) {
+      lastCursorSendRef.current = now;
+      sendMessage({ type: 'cursor_move', userId, position: p, timestamp: new Date().toISOString() });
+    }
+  };
 
-  // Redraw canvas with all operations
-  const redrawCanvas = useCallback((ctx: CanvasRenderingContext2D) => {
-    // Clear canvas
-    ctx.clearRect(0, 0, width, height);
+  const finishStroke = () => {
+    const op = activeOpRef.current;
+    if (!op) return;
+    activeOpRef.current = null;
 
-    // Draw local operations
-    localOperations.forEach(op => {
-      drawOperation(ctx, op);
-    });
-
-    // Draw remote operations
-    remoteOperations.forEach(op => {
-      drawOperation(ctx, op);
-    });
-  }, [width, height, localOperations, remoteOperations]);
-
-  // Initialize canvas
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Set canvas size
-    canvas.width = width;
-    canvas.height = height;
-
-    // Clear canvas
-    ctx.clearRect(0, 0, width, height);
-
-    // Redraw all operations
-    redrawCanvas(ctx);
-
-    return () => {
-      // Cleanup
-    };
-  }, [width, height, localOperations, remoteOperations]);
-
-  // Send cursor position
-  const sendCursorPosition = useCallback((position: {x: number, y: number}) => {
-    // Throttle cursor updates to prevent too many messages
-    // In a real implementation, we'd use requestAnimationFrame or lodash.throttle
-    webSocketSendMessage({
-      type: 'cursor_move',
-      userId,
-      position,
-      timestamp: new Date().toISOString()
-    });
-  }, [webSocketSendMessage, userId]);
-
-  // Handle mouse/touch events
-  const handlePointerDown = useCallback((e: PointerEvent) => {
-    if (!canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    setIsDrawing(true);
-    setLocalOperations(prev => [
-      ...prev,
-      {
-        points: [{x, y}],
-        color: currentColor,
-        size: currentSize,
-        tool: 'pen',
-        timestamp: new Date().toISOString(),
-        userId
-      }
-    ]);
-  }, [currentColor, currentSize, userId]);
-
-  const handlePointerMove = useCallback((e: PointerEvent) => {
-    if (!isDrawing || !canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    // Update the last operation's points
-    setLocalOperations(prev => {
-      if (prev.length === 0) return prev;
-
-      const lastOp = prev[prev.length - 1];
-      return [
-        ...prev.slice(0, -1),
-        {
-          ...lastOp,
-          points: [...lastOp.points, {x, y}]
-        }
-      ];
-    });
-
-    // Send cursor position to others
-    sendCursorPosition({x, y});
-  }, [isDrawing, sendCursorPosition, userId]);
-
-  // Send drawing operation to server
-  const sendDrawingOperation = useCallback(() => {
-    if (localOperations.length === 0) return;
-
-    const lastOp = localOperations[localOperations.length - 1];
-    if (lastOp.points.length < 2) return; // Need at least 2 points for a line
-
-    // Create operation to send
-    const operationToSend: DrawingOperation = {
-      ...lastOp
-    };
-
-    webSocketSendMessage({
-      type: 'drawing_operation',
-      operation: {
-        ...operationToSend
-      }
-    });
-  }, [webSocketSendMessage]);
-
-  const handlePointerUp = useCallback(() => {
-    setIsDrawing(false);
-
-    // Send the completed drawing operation
-    sendDrawingOperation();
-  }, []);
-
-
-  // Set up pointer event listeners
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const handleDown = (e: PointerEvent) => {
-      e.preventDefault();
-      handlePointerDown(e);
-    };
-
-    const handleMove = (e: PointerEvent) => {
-      if (isDrawing) {
-        e.preventDefault();
-        handlePointerMove(e);
-      }
-    };
-
-    const handleUp = (e: PointerEvent) => {
-      e.preventDefault();
-      handlePointerUp();
-    };
-
-    canvas.addEventListener('pointerdown', handleDown);
-    canvas.addEventListener('pointermove', handleMove);
-    canvas.addEventListener('pointerup', handleUp);
-    canvas.addEventListener('pointercancel', handleUp);
-    canvas.addEventListener('pointerleave', handleUp);
-
-    return () => {
-      canvas.removeEventListener('pointerdown', handleDown);
-      canvas.removeEventListener('pointermove', handleMove);
-      canvas.removeEventListener('pointerup', handleUp);
-      canvas.removeEventListener('pointercancel', handleUp);
-      canvas.removeEventListener('pointerleave', handleUp);
-    };
-  }, [handlePointerDown, handlePointerMove, handlePointerUp, isDrawing]);
+    const valid = op.tool === 'pen' ? op.points.length >= 1 : op.points.length >= 2;
+    if (valid) {
+      localOpsRef.current.push(op);
+      redoStackRef.current = []; // a new stroke invalidates redo
+      sendMessage({ type: 'drawing_operation', operation: { ...op } });
+      emitHistory();
+    }
+    scheduleRedraw();
+  };
 
   return (
-    <div>
+    <div className="relative">
       <canvas
         ref={canvasRef}
         width={width}
         height={height}
-        className="border border-gray-300 cursor-pointer"
+        className="block cursor-crosshair touch-none"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishStroke}
+        onPointerCancel={finishStroke}
       />
-      <div className="absolute inset-0 pointer-events-none">
-        {/* Render remote cursors */}
-        {Object.entries(remoteCursors).map(([userId, cursor]) => (
-          <div
-            key={userId}
-            className="pointer-events-none"
-            style={{
-              left: `${cursor.x}px`,
-              top: `${cursor.y}px`,
-              position: 'absolute',
-              transform: 'translate(-50%, -50%)'
-            }}
-          >
-            <div className="h-2 w-2 rounded-full" style={{backgroundColor: cursor.color, border: '2px solid white'}}></div>
-            <div className="text-xs text-gray-600 bg-white px-1 py-0.5 rounded ml-2 mt-1 whitespace-nowrap">
-              {cursor.name}
+
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        {Object.entries(remoteCursors).map(([id, cursor]) =>
+          cursor.x === undefined || cursor.y === undefined ? null : (
+            <div
+              key={id}
+              className="absolute"
+              style={{ left: cursor.x, top: cursor.y, transform: 'translate(-50%, -50%)' }}
+            >
+              <div
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: cursor.color ?? '#888888', border: '2px solid white' }}
+              />
+              {cursor.name && (
+                <div className="ml-2 mt-1 whitespace-nowrap rounded bg-white px-1 py-0.5 text-xs text-gray-600">
+                  {cursor.name}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          )
+        )}
       </div>
-      <div className="mt-2 text-sm text-gray-500">
+
+      {/* <p> so the [&_p] styles in RoomClient apply */}
+      <p>
         Connection: {connectionStatus} {error && `(${error})`}
-      </div>
-      <div className="mt-2 text-sm text-gray-500">
-        Local Operations: {localOperations.length}
-      </div>
+      </p>
     </div>
   );
-}
+});

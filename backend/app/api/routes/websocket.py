@@ -6,6 +6,7 @@ from app.core.security import verify_token
 from app.db.models import User
 from app.core.exceptions import AuthenticationException, InternalServerErrorException
 from app.core.error_handler import logger
+from app.services.drawing_service import DrawingService
 import json
 import uuid
 from datetime import datetime
@@ -110,7 +111,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-@router.websocket("/ws/{room_id}")
+@router.websocket("/{room_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
     room_id: str,
@@ -139,6 +140,24 @@ async def websocket_endpoint(
         }
 
         await manager.connect(websocket, room_id, user_id, user_info)
+
+        # Initialize drawing service
+        drawing_service = DrawingService(db)
+
+        # Send current canvas state to the new user from database
+        existing_operations = drawing_service.get_room_operations(room_id)
+        if existing_operations:
+            # Convert to the format expected by the client
+            operations_for_client = []
+            for op in existing_operations:
+                operations_for_client.append({
+                    "type": "drawing_operation",
+                    "operation": op["operation_data"]
+                })
+            await websocket.send_text(json.dumps({
+                "type": "canvas_state",
+                "operations": operations_for_client
+            }))
 
         try:
             while True:
@@ -218,6 +237,15 @@ async def websocket_endpoint(
                         "user_id": user_id,
                         "timestamp": datetime.now().isoformat()
                     }
+
+                    # Save to database
+                    drawing_service.save_drawing_operation(
+                        room_id=room_id,
+                        user_id=user_id,
+                        operation_type="drawing_operation",
+                        operation_data=operation
+                    )
+
                     manager.drawing_operations[room_id].append(operation_data)
 
                     # Broadcast to others in the room
@@ -266,6 +294,14 @@ async def websocket_endpoint(
                 )
 
                 elif message["type"] == "clear_canvas":
+                    # Save clear operation to database
+                    drawing_service.save_drawing_operation(
+                        room_id=room_id,
+                        user_id=user_id,
+                        operation_type="clear_canvas",
+                        operation_data={}
+                    )
+
                     # Clear the canvas for this room
                     if room_id in manager.drawing_operations:
                         manager.drawing_operations[room_id] = []

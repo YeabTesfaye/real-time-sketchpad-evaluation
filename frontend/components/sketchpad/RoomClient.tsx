@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useState, useSyncExternalStore } from 'react';
+import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/hooks/useAuth';
 import { Check, Link2, Loader2, Palette, Users, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,16 +13,18 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import { SketchpadCanvas } from '@/components/sketchpad/Canvas';
-import { PeoplePanel, ToolPanel } from '@/components/sketchpad/panels';
+import {
+  SketchpadCanvas,
+  type HistoryState,
+  type SketchpadCanvasHandle,
+} from '@/components/sketchpad/Canvas';
+import { PeoplePanel, ToolPanel, type Identity } from '@/components/sketchpad/panels';
+import type { Tool } from '@/lib/operations';
 import { createRoomCode, roomHref } from '@/lib/room-code';
 import { cn } from '@/lib/utils';
 
 // Horizontal padding shared by the room bar, the workspace frame and the footer
 const EDGE = 'px-4 sm:px-6';
-
-// Clearing is owned by Canvas and has no page-level hook yet
-const noop = () => {};
 
 /* ---------- client-only helpers ---------- */
 
@@ -42,6 +45,30 @@ function useMediaQuery(query: string) {
     [query]
   );
   return useSyncExternalStore(subscribe, () => window.matchMedia(query).matches, () => false);
+}
+
+function isIdentity(value: unknown): value is Identity {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.id === 'string' && typeof v.name === 'string' && typeof v.color === 'string';
+}
+
+function getUserFromStorage(): Identity {
+  try {
+    const raw = localStorage.getItem('sketchpad_user');
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (isIdentity(parsed)) return parsed;
+    }
+  } catch {
+    // Corrupt JSON falls through to the guest identity
+  }
+  // Fallback (should not happen if logged in)
+  return {
+    id: 'guest-' + Math.random().toString(36).slice(2, 11),
+    name: 'Guest',
+    color: '#888888',
+  };
 }
 
 /* ---------- pieces ---------- */
@@ -129,21 +156,13 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
   const isDesktop = useMediaQuery('(min-width: 1024px)');
 
   // Lazy initializer runs once, only on the client (see the gate below)
-  const getUserFromStorage = () => {
-    const userJson = localStorage.getItem('sketchpad_user');
-    if (userJson) {
-      return JSON.parse(userJson);
-    }
-    // Fallback (should not happen if logged in)
-    return {
-      id: 'guest-' + Math.random().toString(36).substr(2, 9),
-      name: 'Guest',
-      color: '#888888'
-    };
-  };
   const [user] = useState(getUserFromStorage);
   const [color, setColor] = useState(user.color);
   const [size, setSize] = useState(2);
+  const [currentTool, setCurrentTool] = useState<Tool>('pen');
+  // Canvas pushes these flags up, so nothing reads the ref during render
+  const [history, setHistory] = useState<HistoryState>({ canUndo: false, canRedo: false });
+  const canvasRef = useRef<SketchpadCanvasHandle>(null);
 
   const newRoom = useCallback(() => router.push(roomHref(createRoomCode())), [router]);
   const leave = useCallback(() => router.push('/sketchpad'), [router]);
@@ -154,9 +173,15 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
       userColor={user.color}
       color={color}
       size={size}
+      currentTool={currentTool}
       onColorChange={setColor}
       onSizeChange={setSize}
-      onClear={noop}
+      onClear={() => canvasRef.current?.clear()}
+      onToolChange={setCurrentTool}
+      onUndo={() => canvasRef.current?.undo()}
+      onRedo={() => canvasRef.current?.redo()}
+      canUndo={history.canUndo}
+      canRedo={history.canRedo}
     />
   );
   const people = <PeoplePanel roomId={roomId} user={user} onNewRoom={newRoom} onLeave={leave} />;
@@ -197,19 +222,21 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
         {isDesktop && <SidePanel>{tools}</SidePanel>}
 
         <section className="flex min-w-0 flex-1 overflow-auto rounded-2xl border bg-secondary text-border bg-[radial-gradient(circle,currentColor_1px,transparent_1px)] bg-size-[22px_22px]">
-
           {/* m-auto centers the canvas, and still scrolls from the top-left when it is bigger than the area */}
           <div className="m-auto p-4 lg:p-6">
             {/* Paper stays light in both themes so stroke colors read the same everywhere.
                 The [&_p] rules tidy the status lines Canvas prints under itself. */}
             <div className="w-fit overflow-hidden rounded-xl border bg-[#fbfaf7] shadow-md [&_canvas]:block [&_p]:border-t [&_p]:border-neutral-200 [&_p]:px-3 [&_p]:py-1.5 [&_p]:text-xs [&_p]:text-neutral-500">
               <SketchpadCanvas
+                ref={canvasRef}
                 width={800}
                 height={600}
                 roomId={roomId}
                 userId={user.id}
                 currentColor={color}
                 currentSize={size}
+                currentTool={currentTool}
+                onHistoryChange={setHistory}
               />
             </div>
           </div>
@@ -232,7 +259,22 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
 }
 
 export default function RoomClient({ roomId }: { roomId: string }) {
+  const { user, loading } = useAuth();
   const isClient = useIsClient();
+  const router = useRouter();
+
+  // If still loading, show loading state
+  if (loading) {
+    return <RoomLoading />;
+  }
+
+  // If not authenticated, redirect to login
+  if (!user) {
+    router.push("/login");
+    // Return null to prevent rendering while redirecting
+    return null;
+  }
+
   // key remounts the workspace when the room changes, so sockets and canvas state reset cleanly
   return isClient ? <RoomWorkspace key={roomId} roomId={roomId} /> : <RoomLoading />;
 }
