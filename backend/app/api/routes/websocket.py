@@ -1,8 +1,11 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 from app.core.database import get_db
 from app.core.security import verify_token
 from app.db.models import User
+from app.core.exceptions import AuthenticationException, InternalServerErrorException
+from app.core.error_handler import logger
 import json
 import uuid
 from datetime import datetime
@@ -115,145 +118,146 @@ async def websocket_endpoint(
     db: Session = Depends(get_db)
 ):
     # Verify token
-    token_data = verify_token(token)
-    if token_data is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-
-    # Get user from database
-    user = db.query(User).filter(User.id == token_data.user_id).first()
-    if not user:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-
-    user_id = str(user.id)
-    user_info = {
-        "user_id": user_id,
-        "joined_at": datetime.now().isoformat(),
-        "color": f"hsl({hash(user_id) % 360}, 70%, 50%)",  # Generate color from user_id
-        "name": user.full_name or f"User-{user_id[:4]}",
-    }
-
-    await manager.connect(websocket, room_id, user_id, user_info)
-
     try:
-        while True:
-            # Receive message from client
-            data = await websocket.receive_text()
+        token_data = verify_token(token)
+        if token_data is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
 
-            # Validate message size
-            if len(data.encode('utf-8')) > MAX_MESSAGE_SIZE:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "message": "Message too large"
-                }))
-                continue
+        # Get user from database
+        user = db.query(User).filter(User.id == token_data.user_id).first()
+        if not user:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
 
-            try:
-                message = json.loads(data)
-            except json.JSONDecodeError:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "message": "Invalid JSON"
-                }))
-                continue
+        user_id = str(user.id)
+        user_info = {
+            "user_id": user_id,
+            "joined_at": datetime.now().isoformat(),
+            "color": f"hsl({hash(user_id) % 360}, 70%, 50%)",  # Generate color from user_id
+            "name": f"{user.firstname or ''} {user.lastname or ''}".strip() or f"User-{user_id[:4]}",
+        }
 
-            # Validate message type
-            if "type" not in message or message["type"] not in VALID_MESSAGE_TYPES:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "message": "Invalid message type"
-                }))
-                continue
+        await manager.connect(websocket, room_id, user_id, user_info)
 
-            # Handle different message types
-            if message["type"] == "drawing_operation":
-                # Validate drawing operation
-                if "operation" not in message:
+        try:
+            while True:
+                # Receive message from client
+                data = await websocket.receive_text()
+
+                # Validate message size
+                if len(data.encode('utf-8')) > MAX_MESSAGE_SIZE:
                     await websocket.send_text(json.dumps({
                         "type": "error",
-                        "message": "Missing operation data"
+                        "message": "Message too large"
                     }))
                     continue
 
-                operation = message["operation"]
-                required_fields = ["points", "color", "size", "tool"]
-                if not all(field in operation for field in required_fields):
+                try:
+                    message = json.loads(data)
+                except json.JSONDecodeError:
                     await websocket.send_text(json.dumps({
                         "type": "error",
-                        "message": "Invalid operation format"
+                        "message": "Invalid JSON"
                     }))
                     continue
 
-                # Validate points
-                if not isinstance(operation["points"], list) or len(operation["points"]) > MAX_OPERATION_POINTS:
+                # Validate message type
+                if "type" not in message or message["type"] not in VALID_MESSAGE_TYPES:
                     await websocket.send_text(json.dumps({
                         "type": "error",
-                        "message": "Invalid points data"
+                        "message": "Invalid message type"
                     }))
                     continue
 
-                # Validate each point
-                for point in operation["points"]:
-                    if not isinstance(point, dict) or "x" not in point or "y" not in point:
+                # Handle different message types
+                if message["type"] == "drawing_operation":
+                    # Validate drawing operation
+                    if "operation" not in message:
                         await websocket.send_text(json.dumps({
                             "type": "error",
-                            "message": "Invalid point format"
-                        }))
-                        continue
-                    if not isinstance(point["x"], (int, float)) or not isinstance(point["y"], (int, float)):
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "message": "Point coordinates must be numbers"
+                            "message": "Missing operation data"
                         }))
                         continue
 
-                # Store the operation
-                operation_data = {
-                    **operation,
-                    "user_id": user_id,
-                    "timestamp": datetime.now().isoformat()
-                }
-                manager.drawing_operations[room_id].append(operation_data)
+                    operation = message["operation"]
+                    required_fields = ["points", "color", "size", "tool"]
+                    if not all(field in operation for field in required_fields):
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "message": "Invalid operation format"
+                        }))
+                        continue
 
-                # Broadcast to others in the room
-                await manager.broadcast_to_room(
-                    room_id,
-                    {
-                        "type": "drawing_operation",
-                        "operation": operation_data
-                    },
-                    exclude_user=user_id
-                )
+                    # Validate points
+                    if not isinstance(operation["points"], list) or len(operation["points"]) > MAX_OPERATION_POINTS:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "message": "Invalid points data"
+                        }))
+                        continue
 
-            elif message["type"] == "cursor_move":
-                # Validate cursor move
-                if "position" not in message or not isinstance(message["position"], dict):
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "message": "Invalid cursor move data"
-                    }))
-                    continue
+                    # Validate each point
+                    for point in operation["points"]:
+                        if not isinstance(point, dict) or "x" not in point or "y" not in point:
+                            await websocket.send_text(json.dumps({
+                                "type": "error",
+                                "message": "Invalid point format"
+                            }))
+                            continue
+                        if not isinstance(point["x"], (int, float)) or not isinstance(point["y"], (int, float)):
+                            await websocket.send_text(json.dumps({
+                                "type": "error",
+                                "message": "Point coordinates must be numbers"
+                            }))
+                            continue
 
-                position = message["position"]
-                if "x" not in position or "y" not in position:
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "message": "Invalid position format"
-                    }))
-                    continue
-                if not isinstance(position["x"], (int, float)) or not isinstance(position["y"], (int, float)):
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "message": "Position coordinates must be numbers"
-                    }))
-                    continue
+                    # Store the operation
+                    operation_data = {
+                        **operation,
+                        "user_id": user_id,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    manager.drawing_operations[room_id].append(operation_data)
 
-                # Broadcast cursor position to others
-                await manager.broadcast_to_room(
-                    room_id,
-                    {
-                        "type": "cursor_move",
+                    # Broadcast to others in the room
+                    await manager.broadcast_to_room(
+                        room_id,
+                        {
+                            "type": "drawing_operation",
+                            "operation": operation_data
+                        },
+                        exclude_user=user_id
+                    )
+
+                elif message["type"] == "cursor_move":
+                    # Validate cursor move
+                    if "position" not in message or not isinstance(message["position"], dict):
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "message": "Invalid cursor move data"
+                        }))
+                        continue
+
+                    position = message["position"]
+                    if "x" not in position or "y" not in position:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "message": "Invalid position format"
+                        }))
+                        continue
+                    if not isinstance(position["x"], (int, float)) or not isinstance(position["y"], (int, float)):
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "message": "Position coordinates must be numbers"
+                        }))
+                        continue
+
+                    # Broadcast cursor position to others
+                    await manager.broadcast_to_room(
+                        room_id,
+                        {
+                            "type": "cursor_move",
                         "user_id": user_id,
                         "position": message["position"],
                         "timestamp": datetime.now().isoformat()
@@ -261,24 +265,47 @@ async def websocket_endpoint(
                     exclude_user=user_id
                 )
 
-            elif message["type"] == "clear_canvas":
-                # Clear the canvas for this room
-                if room_id in manager.drawing_operations:
-                    manager.drawing_operations[room_id] = []
+                elif message["type"] == "clear_canvas":
+                    # Clear the canvas for this room
+                    if room_id in manager.drawing_operations:
+                        manager.drawing_operations[room_id] = []
 
-                # Broadcast clear canvas to others in the room
-                await manager.broadcast_to_room(
-                    room_id,
-                    {
-                        "type": "clear_canvas",
-                        "user_id": user_id,
-                        "timestamp": datetime.now().isoformat()
-                    },
-                    exclude_user=user_id
-                )
+                    # Broadcast clear canvas to others in the room
+                    await manager.broadcast_to_room(
+                        room_id,
+                        {
+                            "type": "clear_canvas",
+                            "user_id": user_id,
+                            "timestamp": datetime.now().isoformat()
+                        },
+                        exclude_user=user_id
+                    )
 
-    except WebSocketDisconnect:
-        manager.disconnect(room_id, user_id)
+        except WebSocketDisconnect:
+            manager.disconnect(room_id, user_id)
+        except SQLAlchemyError as e:
+            logger.error(f"Database error in websocket: {e}")
+            try:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            except:
+                pass
+            manager.disconnect(room_id, user_id)
+        except Exception as e:
+            logger.error(f"Unexpected error in websocket: {e}")
+            try:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            except:
+                pass
+            manager.disconnect(room_id, user_id)
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in websocket setup: {e}")
+        try:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        except:
+            pass
     except Exception as e:
-        print(f"WebSocket error: {e}")
-        manager.disconnect(room_id, user_id)
+        logger.error(f"Unexpected error in websocket setup: {e}")
+        try:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        except:
+            pass
