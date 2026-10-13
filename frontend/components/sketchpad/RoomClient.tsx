@@ -307,6 +307,18 @@ function RoomWorkspace({ roomId, user }: { roomId: string; user: Identity | null
 
 export default function RoomClient({ roomId }: { roomId: string }) {
   const router = useRouter();
+
+  // Extract token from URL and store in localStorage on initial mount
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const token = searchParams.get('token');
+    if (token) {
+      localStorage.setItem('sketchpad_token', token);
+      // Optionally remove the token from the URL for cleaner UI
+      // window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
   const { user, loading } = useAuth();
   const isClient = useIsClient();
 

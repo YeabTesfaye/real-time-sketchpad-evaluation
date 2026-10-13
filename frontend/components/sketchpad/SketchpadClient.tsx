@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/hooks/useAuth";
 import { useRouter } from "next/navigation";
 import { CONTAINER } from "@/lib/layout";
 import { ROOM_CODE_LENGTH } from "@/lib/room-code";
+import { useEffect } from "react";
 
 const POINTS = [
   "Live cursors and strokes for everyone in the room",
@@ -15,6 +16,17 @@ const POINTS = [
 ];
 
 export const SketchpadClient = () => {
+  // Extract token from URL and store in localStorage on initial mount
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const token = searchParams.get('token');
+    if (token) {
+      localStorage.setItem('sketchpad_token', token);
+      // Optionally remove the token from the URL for cleaner UI
+      // window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
   const { user, loading } = useAuth();
   const router = useRouter();
 

@@ -18,12 +18,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StartRoomButton } from "@/components/room-actions";
+import { roomHref } from "@/lib/room-code";
 
 // Same container as site-header so the edges line up
 const CONTAINER = "mx-auto w-full max-w-[1600px] px-4 sm:px-6 lg:px-10";
-
-// Adjust to your real room route
-const roomPath = (code: string) => `/room/${code}`;
 
 const STEPS = [
   { n: "01", title: "Start a room", body: "One click creates a private room with an 8-character code." },
@@ -94,11 +92,13 @@ function JoinForm() {
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (code.length !== 8) {
+    const clean = code.trim().toUpperCase();
+    if (!/^[A-Z0-9]{8}$/.test(clean)) {
       setError("Room codes are 8 characters.");
       return;
     }
-    router.push(roomPath(code));
+    // roomHref is the single source of truth for the room route (/sketchpad/<code>)
+    router.push(roomHref(clean));
   }
 
   return (

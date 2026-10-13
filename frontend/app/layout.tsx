@@ -18,7 +18,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${sourceSerif.variable} ${jetbrains.variable}`}>
+    <html data-scroll-behavior="smooth" lang="en" suppressHydrationWarning className={`${inter.variable} ${sourceSerif.variable} ${jetbrains.variable}`}>
       <body className="font-sans min-h-full flex flex-col bg-background text-foreground antialiased">
         <ThemeProvider>{children}</ThemeProvider>
       </body>

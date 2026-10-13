@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from ..db.models import Room, DrawingOperation
 from ..core.exceptions import InternalServerErrorException
+from app.core.error_handler import logger
 import json
 import uuid
 from datetime import datetime
@@ -68,15 +69,20 @@ class DrawingService:
             # Convert JSON strings back to dictionaries
             result = []
             for op in operations:
-                op_dict = {
-                    "id": str(op.id),
-                    "room_id": str(op.room_id),
-                    "user_id": op.user_id,
-                    "operation_type": op.operation_type,
-                    "operation_data": json.loads(op.operation_data),
-                    "timestamp": op.timestamp.isoformat() if op.timestamp else None
-                }
-                result.append(op_dict)
+                try:
+                    op_dict = {
+                        "id": str(op.id),
+                        "room_id": str(op.room_id),
+                        "user_id": op.user_id,
+                        "operation_type": op.operation_type,
+                        "operation_data": json.loads(op.operation_data),
+                        "timestamp": op.timestamp.isoformat() if op.timestamp else None
+                    }
+                    result.append(op_dict)
+                except (json.JSONDecodeError, AttributeError, ValueError) as e:
+                    # Skip operations with corrupted data, invalid attributes, or conversion errors
+                    logger.warning(f"Skipping operation due to error: {e}")
+                    continue
 
             return result
         except SQLAlchemyError as e:

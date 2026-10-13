@@ -259,7 +259,7 @@ export const SketchpadCanvas = forwardRef<SketchpadCanvasHandle, CanvasProps>(fu
       }
     }
     scheduleRedraw();
-  }, [messages, userId, scheduleRedraw, emitHistory]);
+  }, [messages, userId, scheduleRedraw, emitHistory,updateBoundsWithPoint]);
 
   const undo = useCallback(() => {
     const op = localOpsRef.current.pop();

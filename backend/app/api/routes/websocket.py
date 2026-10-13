@@ -49,62 +49,78 @@ class ConnectionManager:
         self.room_users[room_id][user_id] = user_info
         print(f"After add, room {room_id} has {len(self.active_connections[room_id])} connections", flush=True)
 
-        # Notify others in the room about the new user
-        await self.broadcast_to_room(
-            room_id,
-            {
-                "type": "user_joined",
-                "user": user_info
-            },
-            exclude_user=user_id
-        )
+        try:
+            # Notify others in the room about the new user
+            await self.broadcast_to_room(
+                room_id,
+                {
+                    "type": "user_joined",
+                    "user": user_info
+                },
+                exclude_user=user_id
+            )
 
-        # Send current canvas state to the new user
-        if self.drawing_operations[room_id]:
-            await websocket.send_text(json.dumps({
-                "type": "canvas_state",
-                "operations": self.drawing_operations[room_id]
-            }))
+            # Send current canvas state to the new user
+            if self.drawing_operations[room_id]:
+                await websocket.send_text(json.dumps({
+                    "type": "canvas_state",
+                    "operations": self.drawing_operations[room_id]
+                }))
+        except Exception as e:
+            # If we fail to notify others or send canvas state, clean up the connection
+            print(f"Error during connect post-accept: {e}", flush=True)
+            await self.disconnect(room_id, user_id)
+            raise
 
     async def disconnect(self, room_id: str, user_id: str):
-        if room_id in self.active_connections:
-            if user_id in self.active_connections[room_id]:
-                del self.active_connections[room_id][user_id]
-            if user_id in self.room_users[room_id]:
-                del self.room_users[room_id][user_id]
+        try:
+            if room_id in self.active_connections:
+                if user_id in self.active_connections[room_id]:
+                    del self.active_connections[room_id][user_id]
+                if user_id in self.room_users[room_id]:
+                    del self.room_users[room_id][user_id]
 
-            # Clean up empty rooms
-            if not self.active_connections[room_id]:
-                del self.active_connections[room_id]
-                del self.drawing_operations[room_id]
-                del self.room_users[room_id]
-            else:
-                # Notify others that user left
-                await self.broadcast_to_room_sync(
-                    room_id,
-                    {
-                        "type": "user_left",
-                        "userId": user_id
-                    }
-                )
+                # Clean up empty rooms
+                if not self.active_connections[room_id]:
+                    del self.active_connections[room_id]
+                    del self.drawing_operations[room_id]
+                    del self.room_users[room_id]
+                else:
+                    # Notify others that user left
+                    await self.broadcast_to_room_sync(
+                        room_id,
+                        {
+                            "type": "user_left",
+                            "userId": user_id
+                        }
+                    )
+        except Exception as e:
+            # Log the error but don't re-raise to avoid cascading failures
+            logger.error(f"Error in disconnect for room {room_id}, user {user_id}: {e}")
+            print(f"Error in disconnect for room {room_id}, user {user_id}: {e}")
 
     async def send_personal_message(self, message: dict, websocket: WebSocket):
         await websocket.send_text(json.dumps(message))
 
     async def broadcast_to_room(self, room_id: str, message: dict, exclude_user: str = None):
-        if room_id in self.active_connections:
-            print(f"Broadcast to room {room_id}: {len(self.active_connections[room_id])} connections", flush=True)
-            for user_id, connection in self.active_connections[room_id].items():
-                print(f"  Checking user {user_id}, exclude_user={exclude_user}", flush=True)
-                if user_id != exclude_user:
-                    try:
-                        print(f"    Sending message to user {user_id}", flush=True)
-                        await connection.send_text(json.dumps(message))
-                        print(f"    Send succeeded", flush=True)
-                    except Exception as e:
-                        print(f"    Send failed: {e}", flush=True)
-                        # Remove broken connections
-                        await self.disconnect(room_id, user_id)
+        try:
+            if room_id in self.active_connections:
+                print(f"Broadcast to room {room_id}: {len(self.active_connections[room_id])} connections", flush=True)
+                for user_id, connection in self.active_connections[room_id].items():
+                    print(f"  Checking user {user_id}, exclude_user={exclude_user}", flush=True)
+                    if user_id != exclude_user:
+                        try:
+                            print(f"    Sending message to user {user_id}", flush=True)
+                            await connection.send_text(json.dumps(message))
+                            print(f"    Send succeeded", flush=True)
+                        except Exception as e:
+                            print(f"    Send failed: {e}", flush=True)
+                            # Remove broken connections
+                            await self.disconnect(room_id, user_id)
+        except Exception as e:
+            # Log the error but don't re-raise to avoid cascading failures
+            logger.error(f"Error in broadcast_to_room for room {room_id}: {e}")
+            print(f"Error in broadcast_to_room for room {room_id}: {e}")
 
     async def broadcast_to_room_sync(self, room_id: str, message: dict, exclude_user: str = None):
         if room_id in self.active_connections:
@@ -155,19 +171,25 @@ async def websocket_endpoint(
         drawing_service = DrawingService(db)
 
         # Send current canvas state to the new user from database
-        existing_operations = drawing_service.get_room_operations(room_code=room_id)
-        if existing_operations:
-            # Convert to the format expected by the client
-            operations_for_client = []
-            for op in existing_operations:
-                operations_for_client.append({
-                    "type": "drawing_operation",
-                    "operation": op["operation_data"]
-                })
-            await websocket.send_text(json.dumps({
-                "type": "canvas_state",
-                "operations": operations_for_client
-            }))
+        try:
+            existing_operations = drawing_service.get_room_operations(room_code=room_id)
+            if existing_operations:
+                # Convert to the format expected by the client
+                operations_for_client = []
+                for op in existing_operations:
+                    operations_for_client.append({
+                        "type": "drawing_operation",
+                        "operation": op["operation_data"]
+                    })
+                await websocket.send_text(json.dumps({
+                    "type": "canvas_state",
+                    "operations": operations_for_client
+                }))
+        except Exception as e:
+            # If we fail to send the initial canvas state, clean up and re-raise
+            print(f"Error sending initial canvas state: {e}", flush=True)
+            await manager.disconnect(room_id, user_id)
+            raise
 
         try:
             while True:

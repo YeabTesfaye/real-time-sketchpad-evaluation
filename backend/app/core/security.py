@@ -32,7 +32,9 @@ def verify_token(token: str) -> Optional[TokenData]:
         user_id: str = payload.get("sub")
         if user_id is None:
             return None
+        # Strip whitespace and handle potential encoding issues
+        user_id = user_id.strip()
         token_data = TokenData(user_id=UUID(user_id))
         return token_data
-    except JWTError:
+    except (JWTError, ValueError, TypeError, AttributeError):
         return None
