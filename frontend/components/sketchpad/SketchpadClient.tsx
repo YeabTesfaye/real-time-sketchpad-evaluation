@@ -23,9 +23,10 @@ export const SketchpadClient = () => {
     return <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center">Loading...</div>;
   }
 
-  // If not authenticated, redirect to login
+  // If not authenticated, redirect to login with next parameter
   if (!user) {
-    router.push("/login");
+    const next = window.location.pathname + window.location.search;
+    router.push(`/login?next=${encodeURIComponent(next)}`);
     // Return null to prevent rendering while redirecting
     return null;
   }

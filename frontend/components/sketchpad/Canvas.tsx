@@ -98,6 +98,20 @@ export const SketchpadCanvas = forwardRef<SketchpadCanvasHandle, CanvasProps>(fu
   const processedRef = useRef(0);
   const lastCursorSendRef = useRef(0);
   const onHistoryChangeRef = useRef(onHistoryChange);
+  const boundsRef = useRef<{ minX: number, maxX: number, minY: number, maxY: number } | null>(null);
+
+  // Update the bounding box to include a point
+  const updateBoundsWithPoint = useCallback((x: number, y: number) => {
+    if (boundsRef.current === null) {
+      boundsRef.current = { minX: x, maxX: x, minY: y, maxY: y };
+    } else {
+      const bounds = boundsRef.current;
+      bounds.minX = Math.min(bounds.minX, x);
+      bounds.maxX = Math.max(bounds.maxX, x);
+      bounds.minY = Math.min(bounds.minY, y);
+      bounds.maxY = Math.max(bounds.maxY, y);
+    }
+  }, []);
 
   const [remoteCursors, setRemoteCursors] = useState<Record<string, RemoteCursor>>({});
   const { sendMessage, messages, connectionStatus, error } = useWebSocket(roomId);
@@ -118,7 +132,21 @@ export const SketchpadCanvas = forwardRef<SketchpadCanvasHandle, CanvasProps>(fu
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Clear only the bounding box region if we have bounds, otherwise clear entire canvas
+    if (boundsRef.current !== null) {
+      const bounds = boundsRef.current;
+      // Add some padding around the bounds for better visual experience
+      const padding = 10;
+      ctx.clearRect(
+        Math.max(0, bounds.minX - padding),
+        Math.max(0, bounds.minY - padding),
+        Math.min(canvas.width, bounds.maxX - bounds.minX + 2 * padding),
+        Math.min(canvas.height, bounds.maxY - bounds.minY + 2 * padding)
+      );
+    } else {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
     for (const op of remoteOpsRef.current) drawOperation(ctx, op);
     for (const op of localOpsRef.current) drawOperation(ctx, op);
     if (activeOpRef.current) drawOperation(ctx, activeOpRef.current);
@@ -134,6 +162,8 @@ export const SketchpadCanvas = forwardRef<SketchpadCanvasHandle, CanvasProps>(fu
 
   // Changing the width/height attributes wipes the bitmap, so redraw after a resize
   useEffect(() => {
+    // Reset bounds when canvas size changes
+    boundsRef.current = null;
     redraw();
     return () => {
       if (rafRef.current) {
@@ -152,10 +182,32 @@ export const SketchpadCanvas = forwardRef<SketchpadCanvasHandle, CanvasProps>(fu
 
     for (const message of fresh) {
       switch (message.type) {
+        case 'canvas_state': {
+          // Process existing operations when joining a room
+          if (message.operations && Array.isArray(message.operations)) {
+            for (const opMessage of message.operations) {
+              const operation = OperationUtils.deserializeOperation(opMessage);
+              if (operation && operation.userId !== userId) {
+                remoteOpsRef.current.push(operation);
+                // Update bounds with all points in the operation
+                for (const point of operation.points) {
+                  updateBoundsWithPoint(point.x, point.y);
+                }
+              }
+            }
+          }
+          break;
+        }
         case 'drawing_operation': {
           const operation = OperationUtils.deserializeOperation(message);
           // Skip our own echo if the server broadcasts back to the sender
-          if (operation && operation.userId !== userId) remoteOpsRef.current.push(operation);
+          if (operation && operation.userId !== userId) {
+            remoteOpsRef.current.push(operation);
+            // Update bounds with all points in the operation
+            for (const point of operation.points) {
+              updateBoundsWithPoint(point.x, point.y);
+            }
+          }
           break;
         }
         case 'cursor_move': {
@@ -171,6 +223,8 @@ export const SketchpadCanvas = forwardRef<SketchpadCanvasHandle, CanvasProps>(fu
                 timestamp: Date.now(),
               },
             }));
+            // Update bounds with the cursor position
+            updateBoundsWithPoint(cursorData.position.x, cursorData.position.y);
           }
           break;
         }
@@ -196,6 +250,7 @@ export const SketchpadCanvas = forwardRef<SketchpadCanvasHandle, CanvasProps>(fu
           redoStackRef.current = [];
           activeOpRef.current = null;
           setRemoteCursors({});
+          boundsRef.current = null; // Reset bounds when canvas is cleared
           emitHistory();
           break;
         }
@@ -248,8 +303,12 @@ export const SketchpadCanvas = forwardRef<SketchpadCanvasHandle, CanvasProps>(fu
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
 
+    const point = toPoint(e);
+    // Update bounds with the initial point
+    updateBoundsWithPoint(point.x, point.y);
+
     activeOpRef.current = {
-      points: [toPoint(e)],
+      points: [point],
       color: currentColor,
       size: currentSize,
       tool: currentTool,
@@ -266,6 +325,8 @@ export const SketchpadCanvas = forwardRef<SketchpadCanvasHandle, CanvasProps>(fu
     if (op) {
       if (op.tool === 'pen') op.points.push(p);
       else op.points = [op.points[0], p]; // shapes: start point plus current point
+      // Update bounds with the new point
+      updateBoundsWithPoint(p.x, p.y);
       scheduleRedraw();
     }
 
@@ -281,6 +342,11 @@ export const SketchpadCanvas = forwardRef<SketchpadCanvasHandle, CanvasProps>(fu
     const op = activeOpRef.current;
     if (!op) return;
     activeOpRef.current = null;
+
+    // Update bounds with all points in the operation
+    for (const point of op.points) {
+      updateBoundsWithPoint(point.x, point.y);
+    }
 
     const valid = op.tool === 'pen' ? op.points.length >= 1 : op.points.length >= 2;
     if (valid) {

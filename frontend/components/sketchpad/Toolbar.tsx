@@ -1,7 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-
 interface ToolbarProps {
   onColorChange: (color: string) => void;
   onSizeChange: (size: number) => void;

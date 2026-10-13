@@ -30,6 +30,7 @@ class DrawingService:
     def save_drawing_operation(self, room_code: str, user_id: str, operation_type: str, operation_data: dict) -> DrawingOperation:
         """Save a drawing operation to the database."""
         try:
+            print(f"Saving drawing operation for room_code={room_code}, user_id={user_id}")  # Debug print
             room = self.get_or_create_room(room_code)
 
             drawing_op = DrawingOperation(
@@ -46,6 +47,7 @@ class DrawingService:
             return drawing_op
         except SQLAlchemyError as e:
             self.db.rollback()
+            print(f"Database error in save_drawing_operation: {e}")  # Debug print
             raise InternalServerErrorException(
                 detail="Database error occurred while saving drawing operation"
             ) from e

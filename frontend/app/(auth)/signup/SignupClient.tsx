@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +27,7 @@ const FIELD_ORDER: Field[] = ["name", "email", "password", "confirm"];
 
 export default function SignupClient() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -106,7 +107,10 @@ export default function SignupClient() {
       };
       localStorage.setItem('sketchpad_user', JSON.stringify(userWithColor));
 
-      router.push('/');
+      // Redirect to the intended destination or fallback to home
+      const nextParam = searchParams.get('next');
+      const nextUrl = nextParam ? decodeURIComponent(nextParam) : '/';
+      router.push(nextUrl);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       setFormError(message);

@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { Check, Link2, Loader2, Palette, Users, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { createRoomCode, roomHref } from '@/lib/room-code';
 import {
   Sheet,
   SheetContent,
@@ -20,7 +21,6 @@ import {
 } from '@/components/sketchpad/Canvas';
 import { PeoplePanel, ToolPanel, type Identity } from '@/components/sketchpad/panels';
 import type { Tool } from '@/lib/operations';
-import { createRoomCode, roomHref } from '@/lib/room-code';
 import { cn } from '@/lib/utils';
 
 // Horizontal padding shared by the room bar, the workspace frame and the footer
@@ -47,29 +47,6 @@ function useMediaQuery(query: string) {
   return useSyncExternalStore(subscribe, () => window.matchMedia(query).matches, () => false);
 }
 
-function isIdentity(value: unknown): value is Identity {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return typeof v.id === 'string' && typeof v.name === 'string' && typeof v.color === 'string';
-}
-
-function getUserFromStorage(): Identity {
-  try {
-    const raw = localStorage.getItem('sketchpad_user');
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw);
-      if (isIdentity(parsed)) return parsed;
-    }
-  } catch {
-    // Corrupt JSON falls through to the guest identity
-  }
-  // Fallback (should not happen if logged in)
-  return {
-    id: 'guest-' + Math.random().toString(36).slice(2, 11),
-    name: 'Guest',
-    color: '#888888',
-  };
-}
 
 /* ---------- pieces ---------- */
 
@@ -86,16 +63,66 @@ function RoomLoading() {
 
 function CopyLinkButton() {
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function copy() {
+    // Reset error state
+    setError(null);
+
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      // Get the token from localStorage (same as useWebSocket hook)
+      const token = localStorage.getItem('sketchpad_token');
+
+      // Build the invite URL with token as query parameter
+      const baseUrl = window.location.origin + window.location.pathname + window.location.search;
+      // Avoid duplicating token parameter if it already exists in the URL
+      const inviteUrl = token && !baseUrl.includes('token=')
+        ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}token=${token}`
+        : baseUrl;
+
+      // Try to use the modern Clipboard API
+      await navigator.clipboard.writeText(inviteUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Needs a secure context and permission. Failing quietly is fine for a convenience button.
+      // Fallback to hidden textarea approach for older browsers or when Clipboard API is not available
+      try {
+        const textarea = document.createElement('textarea');
+        // Get the token from localStorage (same as useWebSocket hook)
+        const token = localStorage.getItem('sketchpad_token');
+
+        // Build the invite URL with token as query parameter
+        const baseUrl = window.location.origin + window.location.pathname + window.location.search;
+        // Avoid duplicating token parameter if it already exists in the URL
+        const inviteUrl = token && !baseUrl.includes('token=')
+          ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}token=${token}`
+          : baseUrl;
+
+        textarea.value = inviteUrl;
+        // Avoid scrolling to bottom
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        // Both methods failed
+        setError('Failed to copy link. Please copy manually.');
+        setCopied(false);
+      }
     }
   }
+
+  // Clear error after 5 seconds
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => setError(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
 
   return (
     <Button variant="outline" size="sm" className="gap-2" onClick={copy} aria-label="Copy invite link">
@@ -104,7 +131,14 @@ function CopyLinkButton() {
       ) : (
         <Link2 className="h-4 w-4" aria-hidden="true" />
       )}
-      <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy invite link'}</span>
+      <span className="hidden sm:inline">
+        {copied ? 'Copied' : 'Copy invite link'}
+      </span>
+      {error && (
+        <span className="text-sm text-destructive ml-2">
+          {error}
+        </span>
+      )}
     </Button>
   );
 }
@@ -117,7 +151,6 @@ function SidePanel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Below lg the fixed 256px sidebars would leave no room for the canvas, so they become sheets
 function PanelSheet({
   side,
   title,
@@ -151,13 +184,16 @@ function PanelSheet({
 
 /* ---------- workspace ---------- */
 
-function RoomWorkspace({ roomId }: { roomId: string }) {
+function RoomWorkspace({ roomId, user }: { roomId: string; user: Identity | null }) {
   const router = useRouter();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
 
-  // Lazy initializer runs once, only on the client (see the gate below)
-  const [user] = useState(getUserFromStorage);
-  const [color, setColor] = useState(user.color);
+  // Get the verified user from props, with fallback for edge cases
+  const userState = user ?? null;
+  // Initialize drawing-related state
+  const [color, setColor] = useState(userState?.color ?? '#888888');
+
+  // Initialize drawing-related state
   const [size, setSize] = useState(2);
   const [currentTool, setCurrentTool] = useState<Tool>('pen');
   // Canvas pushes these flags up, so nothing reads the ref during render
@@ -167,10 +203,21 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
   const newRoom = useCallback(() => router.push(roomHref(createRoomCode())), [router]);
   const leave = useCallback(() => router.push('/sketchpad'), [router]);
 
+  // Generate fallback user ID only once using useState with function initializer
+  const [fallbackUserId] = useState<string>(() => {
+    return 'guest-' + Math.random().toString(36).slice(2, 11);
+  });
+
+  const fallbackUser = useMemo(() => ({
+    id: fallbackUserId,
+    name: 'Guest',
+    color: '#888888',
+  }), [fallbackUserId]);
+
   // Defined once, rendered either in a sidebar or in a sheet, never both
   const tools = (
     <ToolPanel
-      userColor={user.color}
+      userColor={userState?.color ?? '#888888'}
       color={color}
       size={size}
       currentTool={currentTool}
@@ -184,7 +231,7 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
       canRedo={history.canRedo}
     />
   );
-  const people = <PeoplePanel roomId={roomId} user={user} onNewRoom={newRoom} onLeave={leave} />;
+  const people = <PeoplePanel roomId={roomId} user={userState ?? fallbackUser} onNewRoom={newRoom} onLeave={leave} />;
 
   return (
     <div className="flex h-[calc(100dvh-4rem)] flex-col bg-background">
@@ -221,7 +268,7 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
       <div className={cn('flex min-h-0 flex-1 gap-3 py-3 lg:gap-4 lg:py-4', EDGE)}>
         {isDesktop && <SidePanel>{tools}</SidePanel>}
 
-        <section className="flex min-w-0 flex-1 overflow-auto rounded-2xl border bg-secondary text-border bg-[radial-gradient(circle,currentColor_1px,transparent_1px)] bg-size-[22px_22px]">
+        <section className={cn('flex min-w-0 flex-1 overflow-auto rounded-2xl border bg-secondary text-border bg-[radial-gradient(circle,currentColor_1px,transparent_1px)] bg-size-[22px_22px]')}>
           {/* m-auto centers the canvas, and still scrolls from the top-left when it is bigger than the area */}
           <div className="m-auto p-4 lg:p-6">
             {/* Paper stays light in both themes so stroke colors read the same everywhere.
@@ -232,7 +279,7 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
                 width={800}
                 height={600}
                 roomId={roomId}
-                userId={user.id}
+                userId={userState?.id ?? ''}
                 currentColor={color}
                 currentSize={size}
                 currentTool={currentTool}
@@ -259,22 +306,47 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
 }
 
 export default function RoomClient({ roomId }: { roomId: string }) {
+  const router = useRouter();
   const { user, loading } = useAuth();
   const isClient = useIsClient();
-  const router = useRouter();
 
-  // If still loading, show loading state
-  if (loading) {
+  // If not authenticated, redirect to login with next parameter.
+  // Done in an effect because navigating during render is a side effect.
+  // replace() keeps the login redirect out of history so Back doesn't loop.
+  useEffect(() => {
+    if (loading || !isClient || user) return;
+    const next = window.location.pathname + window.location.search;
+    router.replace(`/login?next=${encodeURIComponent(next)}`);
+  }, [loading, isClient, user, router]);
+
+  // Show loading state on the server and while checking auth on the client
+  if (loading || !isClient) {
     return <RoomLoading />;
   }
 
-  // If not authenticated, redirect to login
+  // Not authenticated: the effect above is redirecting, so keep the loader up meanwhile
   if (!user) {
-    router.push("/login");
-    // Return null to prevent rendering while redirecting
-    return null;
+    return <RoomLoading />;
   }
 
+  // Transform user object from useAuth to Identity format
+  const computeColor = (userId: string): string => {
+    let hash = 0;
+    for (let i = 0; i < userId.length; i++) {
+      hash = userId.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    let hue = hash % 360;
+    if (hue < 0) hue += 360;
+    return `hsl(${hue}, 70%, 50%)`;
+  };
+
+  const identityUser = {
+    id: user.id,
+    name: `${user.firstname || ''} ${user.lastname || ''}`.trim() || `User-${String(user.id).slice(0, 4)}`,
+    color: computeColor(user.id),
+    joinedAt: new Date().toISOString(),
+  };
+
   // key remounts the workspace when the room changes, so sockets and canvas state reset cleanly
-  return isClient ? <RoomWorkspace key={roomId} roomId={roomId} /> : <RoomLoading />;
+  return <RoomWorkspace key={roomId} roomId={roomId} user={identityUser} />;
 }

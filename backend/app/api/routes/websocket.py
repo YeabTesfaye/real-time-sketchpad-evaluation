@@ -1,3 +1,4 @@
+print("!!! WEBSOCKET.PY LOADED !!!", flush=True)
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -41,9 +42,12 @@ class ConnectionManager:
             self.active_connections[room_id] = {}
             self.drawing_operations[room_id] = []
             self.room_users[room_id] = {}
+            print(f"Created new entry for room {room_id}", flush=True)
 
+        print(f"Adding user {user_id} to room {room_id}", flush=True)
         self.active_connections[room_id][user_id] = websocket
         self.room_users[room_id][user_id] = user_info
+        print(f"After add, room {room_id} has {len(self.active_connections[room_id])} connections", flush=True)
 
         # Notify others in the room about the new user
         await self.broadcast_to_room(
@@ -62,7 +66,7 @@ class ConnectionManager:
                 "operations": self.drawing_operations[room_id]
             }))
 
-    def disconnect(self, room_id: str, user_id: str):
+    async def disconnect(self, room_id: str, user_id: str):
         if room_id in self.active_connections:
             if user_id in self.active_connections[room_id]:
                 del self.active_connections[room_id][user_id]
@@ -76,11 +80,11 @@ class ConnectionManager:
                 del self.room_users[room_id]
             else:
                 # Notify others that user left
-                self.broadcast_to_room_sync(
+                await self.broadcast_to_room_sync(
                     room_id,
                     {
                         "type": "user_left",
-                        "user_id": user_id
+                        "userId": user_id
                     }
                 )
 
@@ -89,24 +93,29 @@ class ConnectionManager:
 
     async def broadcast_to_room(self, room_id: str, message: dict, exclude_user: str = None):
         if room_id in self.active_connections:
+            print(f"Broadcast to room {room_id}: {len(self.active_connections[room_id])} connections", flush=True)
             for user_id, connection in self.active_connections[room_id].items():
+                print(f"  Checking user {user_id}, exclude_user={exclude_user}", flush=True)
                 if user_id != exclude_user:
                     try:
+                        print(f"    Sending message to user {user_id}", flush=True)
                         await connection.send_text(json.dumps(message))
-                    except:
+                        print(f"    Send succeeded", flush=True)
+                    except Exception as e:
+                        print(f"    Send failed: {e}", flush=True)
                         # Remove broken connections
-                        self.disconnect(room_id, user_id)
+                        await self.disconnect(room_id, user_id)
 
-    def broadcast_to_room_sync(self, room_id: str, message: dict, exclude_user: str = None):
+    async def broadcast_to_room_sync(self, room_id: str, message: dict, exclude_user: str = None):
         if room_id in self.active_connections:
             for user_id, connection in list(self.active_connections[room_id].items()):
                 if user_id != exclude_user:
                     try:
                         # Note: This is synchronous, in practice you'd use async
                         # For simplicity in this example, we'll keep it simple
-                        connection.send_text(json.dumps(message))
+                        await connection.send_text(json.dumps(message))
                     except:
-                        self.disconnect(room_id, user_id)
+                        await self.disconnect(room_id, user_id)
 
 manager = ConnectionManager()
 
@@ -118,6 +127,7 @@ async def websocket_endpoint(
     token: str = Query(...),
     db: Session = Depends(get_db)
 ):
+    print(f"WebSocket endpoint called for room {room_id}", flush=True)
     # Verify token
     try:
         token_data = verify_token(token)
@@ -133,8 +143,8 @@ async def websocket_endpoint(
 
         user_id = str(user.id)
         user_info = {
-            "user_id": user_id,
-            "joined_at": datetime.now().isoformat(),
+            "userId": user_id,
+            "joinedAt": datetime.now().isoformat(),
             "color": f"hsl({hash(user_id) % 360}, 70%, 50%)",  # Generate color from user_id
             "name": f"{user.firstname or ''} {user.lastname or ''}".strip() or f"User-{user_id[:4]}",
         }
@@ -145,7 +155,7 @@ async def websocket_endpoint(
         drawing_service = DrawingService(db)
 
         # Send current canvas state to the new user from database
-        existing_operations = drawing_service.get_room_operations(room_id)
+        existing_operations = drawing_service.get_room_operations(room_code=room_id)
         if existing_operations:
             # Convert to the format expected by the client
             operations_for_client = []
@@ -232,23 +242,27 @@ async def websocket_endpoint(
                             continue
 
                     # Store the operation
+                    print(f"operation received: {operation}, type: {type(operation)}", flush=True)
                     operation_data = {
                         **operation,
-                        "user_id": user_id,
+                        "userId": user_id,
                         "timestamp": datetime.now().isoformat()
                     }
 
                     # Save to database
+                    print(f"Calling save_drawing_operation with room_code={room_id}, user_id={user_id}, operation_type='drawing_operation', operation_data={operation}", flush=True)
                     drawing_service.save_drawing_operation(
-                        room_id=room_id,
+                        room_code=room_id,
                         user_id=user_id,
                         operation_type="drawing_operation",
                         operation_data=operation
                     )
+                    print(f"save_drawing_operation succeeded", flush=True)
 
                     manager.drawing_operations[room_id].append(operation_data)
 
                     # Broadcast to others in the room
+                    print(f"Broadcasting drawing_operation to room {room_id}", flush=True)
                     await manager.broadcast_to_room(
                         room_id,
                         {
@@ -257,6 +271,7 @@ async def websocket_endpoint(
                         },
                         exclude_user=user_id
                     )
+                    print(f"Broadcast completed", flush=True)
 
                 elif message["type"] == "cursor_move":
                     # Validate cursor move
@@ -286,17 +301,17 @@ async def websocket_endpoint(
                         room_id,
                         {
                             "type": "cursor_move",
-                        "user_id": user_id,
-                        "position": message["position"],
-                        "timestamp": datetime.now().isoformat()
-                    },
-                    exclude_user=user_id
-                )
+                            "userId": user_id,
+                            "position": message["position"],
+                            "timestamp": datetime.now().isoformat()
+                        },
+                        exclude_user=user_id
+                    )
 
                 elif message["type"] == "clear_canvas":
                     # Save clear operation to database
                     drawing_service.save_drawing_operation(
-                        room_id=room_id,
+                        room_code=room_id,
                         user_id=user_id,
                         operation_type="clear_canvas",
                         operation_data={}
@@ -311,7 +326,7 @@ async def websocket_endpoint(
                         room_id,
                         {
                             "type": "clear_canvas",
-                            "user_id": user_id,
+                            "userId": user_id,
                             "timestamp": datetime.now().isoformat()
                         },
                         exclude_user=user_id
@@ -321,6 +336,7 @@ async def websocket_endpoint(
             manager.disconnect(room_id, user_id)
         except SQLAlchemyError as e:
             logger.error(f"Database error in websocket: {e}")
+            print(f"Database error in websocket: {e}")
             try:
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             except:
@@ -328,6 +344,7 @@ async def websocket_endpoint(
             manager.disconnect(room_id, user_id)
         except Exception as e:
             logger.error(f"Unexpected error in websocket: {e}")
+            print(f"Unexpected error in websocket: {e}")
             try:
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             except:
