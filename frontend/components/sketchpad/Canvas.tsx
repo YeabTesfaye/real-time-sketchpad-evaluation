@@ -1,20 +1,37 @@
 'use client';
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { DrawingOperation, OperationUtils, Tool } from '@/lib/operations';
-import { useWebSocket } from '@/lib/websocket';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+} from 'react';
+
+import {
+  DrawingOperation,
+  OperationUtils,
+  Tool,
+} from '@/lib/operations';
+
+import {
+  WebSocketHookResult,
+} from '@/lib/websocket';
+
 
 export interface HistoryState {
   canUndo: boolean;
   canRedo: boolean;
 }
 
-// This is what the parent's ref points to. It replaces HTMLCanvasElement, which caused TS2740.
+
 export interface SketchpadCanvasHandle {
   undo: () => void;
   redo: () => void;
   clear: () => void;
 }
+
 
 interface CanvasProps {
   width: number;
@@ -24,379 +41,1318 @@ interface CanvasProps {
   currentColor: string;
   currentSize: number;
   currentTool: Tool;
-  onHistoryChange?: (state: HistoryState) => void;
+  socket: WebSocketHookResult;
+  onHistoryChange?: (
+    state: HistoryState
+  ) => void;
 }
 
-type RemoteCursor = { x?: number; y?: number; color?: string; name?: string; timestamp: number };
 
-function drawOperation(ctx: CanvasRenderingContext2D, op: DrawingOperation) {
-  const pts = op.points;
-  if (pts.length === 0) return;
+type RemoteCursor = {
+  x?: number;
+  y?: number;
+  color?: string;
+  name?: string;
+  timestamp: number;
+};
 
-  const a = pts[0];
-  const b = pts[pts.length - 1];
 
-  ctx.strokeStyle = op.color;
-  ctx.fillStyle = op.color;
-  ctx.lineWidth = op.size;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
+// ============================================================
+// DRAW OPERATION
+// ============================================================
 
-  switch (op.tool) {
-    case 'rectangle':
+function drawOperation(
+  ctx: CanvasRenderingContext2D,
+  op: DrawingOperation
+) {
+
+  const pts =
+    op.points;
+
+
+  if (
+    pts.length === 0
+  ) {
+    return;
+  }
+
+
+  const a =
+    pts[0];
+
+  const b =
+    pts[pts.length - 1];
+
+
+  ctx.strokeStyle =
+    op.color;
+
+  ctx.fillStyle =
+    op.color;
+
+  ctx.lineWidth =
+    op.size;
+
+  ctx.lineCap =
+    'round';
+
+  ctx.lineJoin =
+    'round';
+
+
+  switch (
+    op.tool
+  ) {
+
+    case 'rectangle': {
+
       ctx.beginPath();
-      ctx.rect(a.x, a.y, b.x - a.x, b.y - a.y);
+
+      ctx.rect(
+        a.x,
+        a.y,
+        b.x - a.x,
+        b.y - a.y
+      );
+
       ctx.stroke();
+
       break;
-    case 'ellipse':
+    }
+
+
+    case 'ellipse': {
+
       ctx.beginPath();
+
       ctx.ellipse(
         (a.x + b.x) / 2,
         (a.y + b.y) / 2,
-        Math.abs(b.x - a.x) / 2,
-        Math.abs(b.y - a.y) / 2,
+        Math.abs(
+          b.x - a.x
+        ) / 2,
+        Math.abs(
+          b.y - a.y
+        ) / 2,
         0,
         0,
         Math.PI * 2
       );
+
       ctx.stroke();
+
       break;
-    case 'line':
+    }
+
+
+    case 'line': {
+
       ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
+
+      ctx.moveTo(
+        a.x,
+        a.y
+      );
+
+      ctx.lineTo(
+        b.x,
+        b.y
+      );
+
       ctx.stroke();
+
       break;
+    }
+
+
+    case 'pen':
     default: {
-      // pen: a single point is a dot, otherwise a polyline
-      if (pts.length === 1) {
+
+      if (
+        pts.length === 1
+      ) {
+
         ctx.beginPath();
-        ctx.arc(a.x, a.y, op.size / 2, 0, Math.PI * 2);
+
+        ctx.arc(
+          a.x,
+          a.y,
+          op.size / 2,
+          0,
+          Math.PI * 2
+        );
+
         ctx.fill();
+
         break;
       }
+
+
       ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+
+      ctx.moveTo(
+        pts[0].x,
+        pts[0].y
+      );
+
+
+      for (
+        let i = 1;
+        i < pts.length;
+        i++
+      ) {
+
+        ctx.lineTo(
+          pts[i].x,
+          pts[i].y
+        );
+      }
+
+
       ctx.stroke();
+
+      break;
     }
   }
 }
 
-export const SketchpadCanvas = forwardRef<SketchpadCanvasHandle, CanvasProps>(function SketchpadCanvas(
-  { width, height, roomId, userId, currentColor, currentSize, currentTool, onHistoryChange },
-  ref
-) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Drawing state lives in refs so pointer handlers never read stale closures
-  const localOpsRef = useRef<DrawingOperation[]>([]);
-  const redoStackRef = useRef<DrawingOperation[]>([]);
-  const remoteOpsRef = useRef<DrawingOperation[]>([]);
-  const activeOpRef = useRef<DrawingOperation | null>(null);
-  const rafRef = useRef(0);
-  const processedRef = useRef(0);
-  const lastCursorSendRef = useRef(0);
-  const onHistoryChangeRef = useRef(onHistoryChange);
-  const boundsRef = useRef<{ minX: number, maxX: number, minY: number, maxY: number } | null>(null);
+// ============================================================
+// CANVAS
+// ============================================================
 
-  // Update the bounding box to include a point
-  const updateBoundsWithPoint = useCallback((x: number, y: number) => {
-    if (boundsRef.current === null) {
-      boundsRef.current = { minX: x, maxX: x, minY: y, maxY: y };
-    } else {
-      const bounds = boundsRef.current;
-      bounds.minX = Math.min(bounds.minX, x);
-      bounds.maxX = Math.max(bounds.maxX, x);
-      bounds.minY = Math.min(bounds.minY, y);
-      bounds.maxY = Math.max(bounds.maxY, y);
-    }
-  }, []);
+export const SketchpadCanvas =
+  forwardRef<
+    SketchpadCanvasHandle,
+    CanvasProps
+  >(
+    function SketchpadCanvas(
+      {
+        width,
+        height,
+        userId,
+        currentColor,
+        currentSize,
+        currentTool,
+        socket,
+        onHistoryChange,
+      },
+      ref
+    ) {
 
-  const [remoteCursors, setRemoteCursors] = useState<Record<string, RemoteCursor>>({});
-  const { sendMessage, messages, connectionStatus, error } = useWebSocket(roomId);
+      const canvasRef =
+        useRef<HTMLCanvasElement>(
+          null
+        );
 
-  useEffect(() => {
-    onHistoryChangeRef.current = onHistoryChange;
-  });
 
-  const emitHistory = useCallback(() => {
-    onHistoryChangeRef.current?.({
-      canUndo: localOpsRef.current.length > 0,
-      canRedo: redoStackRef.current.length > 0,
-    });
-  }, []);
+      /*
+       * Operations confirmed by the server.
+       */
+      const operationsRef =
+        useRef<DrawingOperation[]>(
+          []
+        );
 
-  const redraw = useCallback(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
 
-    // Clear only the bounding box region if we have bounds, otherwise clear entire canvas
-    if (boundsRef.current !== null) {
-      const bounds = boundsRef.current;
-      // Add some padding around the bounds for better visual experience
-      const padding = 10;
-      ctx.clearRect(
-        Math.max(0, bounds.minX - padding),
-        Math.max(0, bounds.minY - padding),
-        Math.min(canvas.width, bounds.maxX - bounds.minX + 2 * padding),
-        Math.min(canvas.height, bounds.maxY - bounds.minY + 2 * padding)
-      );
-    } else {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
+      /*
+       * Prevent duplicate operations.
+       */
+      const operationIdsRef =
+        useRef<Set<string>>(
+          new Set()
+        );
 
-    for (const op of remoteOpsRef.current) drawOperation(ctx, op);
-    for (const op of localOpsRef.current) drawOperation(ctx, op);
-    if (activeOpRef.current) drawOperation(ctx, activeOpRef.current);
-  }, []);
 
-  const scheduleRedraw = useCallback(() => {
-    if (rafRef.current) return;
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = 0;
-      redraw();
-    });
-  }, [redraw]);
+      /*
+       * Operation currently being drawn.
+       */
+      const activeOpRef =
+        useRef<DrawingOperation | null>(
+          null
+        );
 
-  // Changing the width/height attributes wipes the bitmap, so redraw after a resize
-  useEffect(() => {
-    // Reset bounds when canvas size changes
-    boundsRef.current = null;
-    redraw();
-    return () => {
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = 0;
-      }
-    };
-  }, [width, height, redraw]);
 
-  // Handle only messages we have not processed yet (messages is append-only)
-  useEffect(() => {
-    if (messages.length < processedRef.current) processedRef.current = 0;
-    const fresh = messages.slice(processedRef.current);
-    processedRef.current = messages.length;
-    if (fresh.length === 0) return;
+      /*
+       * Number of messages already processed.
+       */
+      const processedRef =
+        useRef(0);
 
-    for (const message of fresh) {
-      switch (message.type) {
-        case 'canvas_state': {
-          // Process existing operations when joining a room
-          if (message.operations && Array.isArray(message.operations)) {
-            for (const opMessage of message.operations) {
-              const operation = OperationUtils.deserializeOperation(opMessage);
-              if (operation && operation.userId !== userId) {
-                remoteOpsRef.current.push(operation);
-                // Update bounds with all points in the operation
-                for (const point of operation.points) {
-                  updateBoundsWithPoint(point.x, point.y);
+
+      /*
+       * requestAnimationFrame handle.
+       */
+      const rafRef =
+        useRef(0);
+
+
+      /*
+       * Cursor throttling.
+       */
+      const lastCursorSendRef =
+        useRef(0);
+
+
+      /*
+       * Latest history callback.
+       */
+      const onHistoryChangeRef =
+        useRef(onHistoryChange);
+
+
+      const {
+        sendMessage,
+        messages,
+        connectionStatus,
+        error,
+      } = socket;
+
+
+      // ========================================================
+      // HISTORY CALLBACK
+      // ========================================================
+
+      useEffect(() => {
+
+        onHistoryChangeRef.current =
+          onHistoryChange;
+
+      }, [
+        onHistoryChange,
+      ]);
+
+
+      // ========================================================
+      // REMOTE CURSORS
+      // ========================================================
+      /*
+       * Remote cursors are derived from WebSocket messages.
+       *
+       * This avoids calling setState() synchronously inside
+       * the message-processing effect.
+       */
+
+      const remoteCursors =
+        useMemo<
+          Record<
+            string,
+            RemoteCursor
+          >
+        >(() => {
+
+          const cursors:
+            Record<
+              string,
+              RemoteCursor
+            > = {};
+
+
+          for (
+            const message
+            of messages
+          ) {
+
+            switch (
+              message.type
+            ) {
+
+              case 'clear_canvas': {
+
+                for (
+                  const id
+                  of Object.keys(
+                    cursors
+                  )
+                ) {
+
+                  delete cursors[id];
                 }
+
+                break;
               }
+
+
+              case 'cursor_move': {
+
+                if (
+                  message.userId ===
+                  userId
+                ) {
+                  break;
+                }
+
+
+                const cursorData =
+                  OperationUtils
+                    .deserializeCursorPosition(
+                      message
+                    );
+
+
+                if (
+                  !cursorData
+                ) {
+                  break;
+                }
+
+
+                cursors[
+                  cursorData.userId
+                ] = {
+                  ...cursors[
+                    cursorData.userId
+                  ],
+
+                  x:
+                    cursorData.position.x,
+
+                  y:
+                    cursorData.position.y,
+
+                  timestamp:
+                    Date.now(),
+                };
+
+
+                break;
+              }
+
+
+              case 'user_joined': {
+
+                const joinedUser =
+                  message.user;
+
+
+                if (
+                  joinedUser.userId ===
+                  userId
+                ) {
+                  break;
+                }
+
+
+                cursors[
+                  joinedUser.userId
+                ] = {
+                  ...cursors[
+                    joinedUser.userId
+                  ],
+
+                  color:
+                    joinedUser.color,
+
+                  name:
+                    joinedUser.name,
+
+                  timestamp:
+                    Date.now(),
+                };
+
+
+                break;
+              }
+
+
+              case 'user_left': {
+
+                delete cursors[
+                  message.userId
+                ];
+
+                break;
+              }
+
+
+              default:
+                break;
             }
           }
-          break;
-        }
-        case 'drawing_operation': {
-          const operation = OperationUtils.deserializeOperation(message);
-          // Skip our own echo if the server broadcasts back to the sender
-          if (operation && operation.userId !== userId) {
-            remoteOpsRef.current.push(operation);
-            // Update bounds with all points in the operation
-            for (const point of operation.points) {
-              updateBoundsWithPoint(point.x, point.y);
+
+
+          return cursors;
+
+        }, [
+          messages,
+          userId,
+        ]);
+
+
+      // ========================================================
+      // REDRAW
+      // ========================================================
+
+      const redraw =
+        useCallback(() => {
+
+          const canvas =
+            canvasRef.current;
+
+
+          if (!canvas) {
+            return;
+          }
+
+
+          const ctx =
+            canvas.getContext(
+              '2d'
+            );
+
+
+          if (!ctx) {
+            return;
+          }
+
+
+          ctx.clearRect(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+
+          for (
+            const operation
+            of operationsRef.current
+          ) {
+
+            drawOperation(
+              ctx,
+              operation
+            );
+          }
+
+
+          if (
+            activeOpRef.current
+          ) {
+
+            drawOperation(
+              ctx,
+              activeOpRef.current
+            );
+          }
+
+        }, []);
+
+
+      // ========================================================
+      // SCHEDULE REDRAW
+      // ========================================================
+
+      const scheduleRedraw =
+        useCallback(() => {
+
+          if (
+            rafRef.current
+          ) {
+            return;
+          }
+
+
+          rafRef.current =
+            requestAnimationFrame(
+              () => {
+
+                rafRef.current =
+                  0;
+
+                redraw();
+              }
+            );
+
+        }, [
+          redraw,
+        ]);
+
+
+      // ========================================================
+      // ADD OPERATION
+      // ========================================================
+
+      const addOperation =
+        useCallback(
+          (
+            operation: DrawingOperation
+          ) => {
+
+            if (
+              !operation.id
+            ) {
+              return;
             }
+
+
+            if (
+              operationIdsRef.current.has(
+                operation.id
+              )
+            ) {
+              return;
+            }
+
+
+            operationIdsRef.current.add(
+              operation.id
+            );
+
+
+            operationsRef.current.push(
+              operation
+            );
+
+          },
+          []
+        );
+
+
+      // ========================================================
+      // REMOVE OPERATION
+      // ========================================================
+
+      const removeOperation =
+        useCallback(
+          (
+            operationId: string
+          ) => {
+
+            operationsRef.current =
+              operationsRef.current.filter(
+                operation =>
+                  operation.id !==
+                  operationId
+              );
+
+
+            operationIdsRef.current.delete(
+              operationId
+            );
+
+          },
+          []
+        );
+
+
+      // ========================================================
+      // SERVER MESSAGES
+      // ========================================================
+
+      useEffect(() => {
+
+        /*
+         * If messages were reset/replaced,
+         * start processing from the beginning.
+         */
+        if (
+          messages.length <
+          processedRef.current
+        ) {
+
+          processedRef.current =
+            0;
+        }
+
+
+        const freshMessages =
+          messages.slice(
+            processedRef.current
+          );
+
+
+        processedRef.current =
+          messages.length;
+
+
+        if (
+          freshMessages.length === 0
+        ) {
+
+          return;
+        }
+
+
+        let stateChanged =
+          false;
+
+
+        for (
+          const message
+          of freshMessages
+        ) {
+
+          switch (
+            message.type
+          ) {
+
+            // ==================================================
+            // COMPLETE CANVAS STATE
+            // ==================================================
+
+            case 'canvas_state': {
+
+              operationsRef.current =
+                [];
+
+              operationIdsRef.current =
+                new Set();
+
+
+              for (
+                const operation
+                of message.operations
+              ) {
+
+                addOperation(
+                  operation
+                );
+              }
+
+
+              activeOpRef.current =
+                null;
+
+
+              stateChanged =
+                true;
+
+
+              break;
+            }
+
+
+            // ==================================================
+            // DRAWING OPERATION
+            // ==================================================
+
+            case 'drawing_operation': {
+
+              addOperation(
+                message.operation
+              );
+
+
+              stateChanged =
+                true;
+
+
+              break;
+            }
+
+
+            // ==================================================
+            // UNDO
+            // ==================================================
+
+            case 'undo_operation': {
+
+              removeOperation(
+                message.targetOperationId
+              );
+
+
+              stateChanged =
+                true;
+
+
+              break;
+            }
+
+
+            // ==================================================
+            // REDO
+            // ==================================================
+
+            case 'redo_operation': {
+
+              addOperation(
+                message.operation
+              );
+
+
+              stateChanged =
+                true;
+
+
+              break;
+            }
+
+
+            // ==================================================
+            // CLEAR CANVAS
+            // ==================================================
+
+            case 'clear_canvas': {
+
+              operationsRef.current =
+                [];
+
+              operationIdsRef.current =
+                new Set();
+
+              activeOpRef.current =
+                null;
+
+
+              stateChanged =
+                true;
+
+
+              break;
+            }
+
+
+            // ==================================================
+            // HISTORY
+            // ==================================================
+
+            case 'history_state': {
+
+              onHistoryChangeRef.current?.({
+                canUndo:
+                  message.canUndo,
+
+                canRedo:
+                  message.canRedo,
+              });
+
+
+              break;
+            }
+
+
+            default:
+              break;
           }
-          break;
         }
-        case 'cursor_move': {
-          if (message.userId === userId) break;
-          const cursorData = OperationUtils.deserializeCursorPosition(message);
-          if (cursorData) {
-            setRemoteCursors(prev => ({
-              ...prev,
-              [cursorData.userId]: {
-                ...prev[cursorData.userId],
-                x: cursorData.position.x,
-                y: cursorData.position.y,
-                timestamp: Date.now(),
-              },
-            }));
-            // Update bounds with the cursor position
-            updateBoundsWithPoint(cursorData.position.x, cursorData.position.y);
+
+
+        if (
+          stateChanged
+        ) {
+
+          scheduleRedraw();
+        }
+
+      }, [
+        messages,
+        addOperation,
+        removeOperation,
+        scheduleRedraw,
+      ]);
+
+
+      // ========================================================
+      // REDRAW WHEN SIZE CHANGES
+      // ========================================================
+
+      useEffect(() => {
+
+        scheduleRedraw();
+
+
+        return () => {
+
+          if (
+            rafRef.current
+          ) {
+
+            cancelAnimationFrame(
+              rafRef.current
+            );
+
+
+            rafRef.current =
+              0;
           }
-          break;
-        }
-        case 'user_joined': {
-          const { userId: joinedId, color, name } = message.user;
-          setRemoteCursors(prev => ({
-            ...prev,
-            [joinedId]: { ...prev[joinedId], color, name, timestamp: Date.now() },
-          }));
-          break;
-        }
-        case 'user_left': {
-          setRemoteCursors(prev => {
-            const next = { ...prev };
-            delete next[message.userId];
-            return next;
+        };
+
+      }, [
+        width,
+        height,
+        scheduleRedraw,
+      ]);
+
+
+      // ========================================================
+      // UNDO
+      // ========================================================
+
+      const undo =
+        useCallback(() => {
+
+          if (
+            connectionStatus !==
+            'connected'
+          ) {
+
+            return;
+          }
+
+
+          sendMessage({
+            type:
+              'undo_operation',
           });
-          break;
-        }
-        case 'clear_canvas': {
-          remoteOpsRef.current = [];
-          localOpsRef.current = [];
-          redoStackRef.current = [];
-          activeOpRef.current = null;
-          setRemoteCursors({});
-          boundsRef.current = null; // Reset bounds when canvas is cleared
-          emitHistory();
-          break;
-        }
-        default:
-          break;
-      }
+
+        }, [
+          connectionStatus,
+          sendMessage,
+        ]);
+
+
+      // ========================================================
+      // REDO
+      // ========================================================
+
+      const redo =
+        useCallback(() => {
+
+          if (
+            connectionStatus !==
+            'connected'
+          ) {
+
+            return;
+          }
+
+
+          sendMessage({
+            type:
+              'redo_operation',
+          });
+
+        }, [
+          connectionStatus,
+          sendMessage,
+        ]);
+
+
+      // ========================================================
+      // CLEAR
+      // ========================================================
+
+      const clear =
+        useCallback(() => {
+
+          if (
+            connectionStatus !==
+            'connected'
+          ) {
+
+            return;
+          }
+
+
+          sendMessage({
+            type:
+              'clear_canvas',
+
+            userId,
+
+            timestamp:
+              new Date().toISOString(),
+          });
+
+        }, [
+          connectionStatus,
+          sendMessage,
+          userId,
+        ]);
+
+
+      // ========================================================
+      // IMPERATIVE HANDLE
+      // ========================================================
+
+      useImperativeHandle(
+        ref,
+        () => ({
+          undo,
+          redo,
+          clear,
+        }),
+        [
+          undo,
+          redo,
+          clear,
+        ]
+      );
+
+
+      // ========================================================
+      // POINTER -> CANVAS POINT
+      // ========================================================
+
+      const toPoint =
+        (
+          e: React.PointerEvent<HTMLCanvasElement>
+        ) => {
+
+          const rect =
+            e.currentTarget
+              .getBoundingClientRect();
+
+
+          if (
+            rect.width === 0 ||
+            rect.height === 0
+          ) {
+
+            return {
+              x: 0,
+              y: 0,
+            };
+          }
+
+
+          return {
+
+            x:
+              (e.clientX -
+                rect.left) *
+              (
+                width /
+                rect.width
+              ),
+
+            y:
+              (e.clientY -
+                rect.top) *
+              (
+                height /
+                rect.height
+              ),
+          };
+        };
+
+
+      // ========================================================
+      // POINTER DOWN
+      // ========================================================
+
+      const handlePointerDown =
+        (
+          e: React.PointerEvent<HTMLCanvasElement>
+        ) => {
+
+          if (
+            connectionStatus !==
+            'connected'
+          ) {
+
+            return;
+          }
+
+
+          if (
+            e.pointerType ===
+              'mouse' &&
+            e.button !== 0
+          ) {
+
+            return;
+          }
+
+
+          e.currentTarget.setPointerCapture(
+            e.pointerId
+          );
+
+
+          const point =
+            toPoint(e);
+
+
+          activeOpRef.current = {
+
+            points: [
+              point,
+            ],
+
+            color:
+              currentColor,
+
+            size:
+              currentSize,
+
+            tool:
+              currentTool,
+
+            timestamp:
+              new Date().toISOString(),
+
+            userId,
+          };
+
+
+          scheduleRedraw();
+        };
+
+
+      // ========================================================
+      // POINTER MOVE
+      // ========================================================
+
+      const handlePointerMove =
+        (
+          e: React.PointerEvent<HTMLCanvasElement>
+        ) => {
+
+          const point =
+            toPoint(e);
+
+
+          const activeOperation =
+            activeOpRef.current;
+
+
+          // ----------------------------------------------------
+          // DRAWING
+          // ----------------------------------------------------
+
+          if (
+            activeOperation
+          ) {
+
+            if (
+              activeOperation.tool ===
+              'pen'
+            ) {
+
+              activeOperation.points.push(
+                point
+              );
+
+            } else {
+
+              activeOperation.points = [
+                activeOperation.points[0],
+                point,
+              ];
+            }
+
+
+            scheduleRedraw();
+          }
+
+
+          // ----------------------------------------------------
+          // REMOTE CURSOR
+          // ----------------------------------------------------
+
+          if (
+            connectionStatus !==
+            'connected'
+          ) {
+
+            return;
+          }
+
+
+          const now =
+            performance.now();
+
+
+          if (
+            now -
+              lastCursorSendRef.current >
+            33
+          ) {
+
+            lastCursorSendRef.current =
+              now;
+
+
+            sendMessage({
+              type:
+                'cursor_move',
+
+              userId,
+
+              position:
+                point,
+
+              timestamp:
+                new Date().toISOString(),
+            });
+          }
+        };
+
+
+      // ========================================================
+      // FINISH DRAWING
+      // ========================================================
+
+      const finishStroke =
+        () => {
+
+          const operation =
+            activeOpRef.current;
+
+
+          if (
+            !operation
+          ) {
+
+            return;
+          }
+
+
+          activeOpRef.current =
+            null;
+
+
+          const valid =
+            operation.tool ===
+            'pen'
+              ? operation.points.length >= 1
+              : operation.points.length >= 2;
+
+
+          if (
+            !valid
+          ) {
+
+            scheduleRedraw();
+
+            return;
+          }
+
+
+          if (
+            connectionStatus !==
+            'connected'
+          ) {
+
+            scheduleRedraw();
+
+            return;
+          }
+
+
+          /*
+           * Send to the server.
+           *
+           * The server is responsible for assigning
+           * the final operation ID/timestamp and
+           * broadcasting the operation.
+           */
+
+          sendMessage({
+            type:
+              'drawing_operation',
+
+            operation,
+          });
+
+
+          scheduleRedraw();
+        };
+
+
+      // ========================================================
+      // RENDER
+      // ========================================================
+
+      return (
+        <div className="relative">
+
+          <canvas
+            ref={canvasRef}
+            width={width}
+            height={height}
+            className="block cursor-crosshair touch-none"
+            onPointerDown={
+              handlePointerDown
+            }
+            onPointerMove={
+              handlePointerMove
+            }
+            onPointerUp={
+              finishStroke
+            }
+            onPointerCancel={
+              finishStroke
+            }
+          />
+
+
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+
+            {Object.entries(
+              remoteCursors
+            ).map(
+              ([
+                id,
+                cursor,
+              ]) => {
+
+                if (
+                  cursor.x ===
+                    undefined ||
+                  cursor.y ===
+                    undefined
+                ) {
+
+                  return null;
+                }
+
+
+                return (
+                  <div
+                    key={id}
+                    className="absolute"
+                    style={{
+                      left:
+                        cursor.x,
+
+                      top:
+                        cursor.y,
+
+                      transform:
+                        'translate(-50%, -50%)',
+                    }}
+                  >
+
+                    <div
+                      className="h-2 w-2 rounded-full"
+                      style={{
+                        backgroundColor:
+                          cursor.color ??
+                          '#888888',
+
+                        border:
+                          '2px solid white',
+                      }}
+                    />
+
+
+                    {cursor.name && (
+                      <div className="ml-2 mt-1 whitespace-nowrap rounded bg-white px-1 py-0.5 text-xs text-gray-600">
+                        {cursor.name}
+                      </div>
+                    )}
+
+                  </div>
+                );
+              }
+            )}
+
+          </div>
+
+
+          <p>
+            Connection:{' '}
+            {connectionStatus}
+
+            {error &&
+              ` (${error})`}
+          </p>
+
+        </div>
+      );
     }
-    scheduleRedraw();
-  }, [messages, userId, scheduleRedraw, emitHistory,updateBoundsWithPoint]);
-
-  const undo = useCallback(() => {
-    const op = localOpsRef.current.pop();
-    if (!op) return;
-    redoStackRef.current.push(op);
-    emitHistory();
-    scheduleRedraw();
-  }, [emitHistory, scheduleRedraw]);
-
-  const redo = useCallback(() => {
-    const op = redoStackRef.current.pop();
-    if (!op) return;
-    localOpsRef.current.push(op);
-    emitHistory();
-    scheduleRedraw();
-  }, [emitHistory, scheduleRedraw]);
-
-  const clear = useCallback(() => {
-    localOpsRef.current = [];
-    remoteOpsRef.current = [];
-    redoStackRef.current = [];
-    activeOpRef.current = null;
-    emitHistory();
-    scheduleRedraw();
-    // ClearCanvas requires a timestamp in your WebSocketMessage union
-    sendMessage({ type: 'clear_canvas', userId, timestamp: new Date().toISOString() });
-  }, [emitHistory, scheduleRedraw, sendMessage, userId]);
-
-  useImperativeHandle(ref, () => ({ undo, redo, clear }), [undo, redo, clear]);
-
-  // Map CSS pixels to canvas pixels so drawing stays correct if the canvas is ever scaled
-  const toPoint = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return {
-      x: (e.clientX - rect.left) * (width / rect.width),
-      y: (e.clientY - rect.top) * (height / rect.height),
-    };
-  };
-
-  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-
-    const point = toPoint(e);
-    // Update bounds with the initial point
-    updateBoundsWithPoint(point.x, point.y);
-
-    activeOpRef.current = {
-      points: [point],
-      color: currentColor,
-      size: currentSize,
-      tool: currentTool,
-      timestamp: new Date().toISOString(),
-      userId,
-    };
-    scheduleRedraw();
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const p = toPoint(e);
-    const op = activeOpRef.current;
-
-    if (op) {
-      if (op.tool === 'pen') op.points.push(p);
-      else op.points = [op.points[0], p]; // shapes: start point plus current point
-      // Update bounds with the new point
-      updateBoundsWithPoint(p.x, p.y);
-      scheduleRedraw();
-    }
-
-    // Throttle presence updates to roughly 30 per second
-    const now = performance.now();
-    if (now - lastCursorSendRef.current > 33) {
-      lastCursorSendRef.current = now;
-      sendMessage({ type: 'cursor_move', userId, position: p, timestamp: new Date().toISOString() });
-    }
-  };
-
-  const finishStroke = () => {
-    const op = activeOpRef.current;
-    if (!op) return;
-    activeOpRef.current = null;
-
-    // Update bounds with all points in the operation
-    for (const point of op.points) {
-      updateBoundsWithPoint(point.x, point.y);
-    }
-
-    const valid = op.tool === 'pen' ? op.points.length >= 1 : op.points.length >= 2;
-    if (valid) {
-      localOpsRef.current.push(op);
-      redoStackRef.current = []; // a new stroke invalidates redo
-      sendMessage({ type: 'drawing_operation', operation: { ...op } });
-      emitHistory();
-    }
-    scheduleRedraw();
-  };
-
-  return (
-    <div className="relative">
-      <canvas
-        ref={canvasRef}
-        width={width}
-        height={height}
-        className="block cursor-crosshair touch-none"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={finishStroke}
-        onPointerCancel={finishStroke}
-      />
-
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        {Object.entries(remoteCursors).map(([id, cursor]) =>
-          cursor.x === undefined || cursor.y === undefined ? null : (
-            <div
-              key={id}
-              className="absolute"
-              style={{ left: cursor.x, top: cursor.y, transform: 'translate(-50%, -50%)' }}
-            >
-              <div
-                className="h-2 w-2 rounded-full"
-                style={{ backgroundColor: cursor.color ?? '#888888', border: '2px solid white' }}
-              />
-              {cursor.name && (
-                <div className="ml-2 mt-1 whitespace-nowrap rounded bg-white px-1 py-0.5 text-xs text-gray-600">
-                  {cursor.name}
-                </div>
-              )}
-            </div>
-          )
-        )}
-      </div>
-
-      {/* <p> so the [&_p] styles in RoomClient apply */}
-      <p>
-        Connection: {connectionStatus} {error && `(${error})`}
-      </p>
-    </div>
   );
-});
