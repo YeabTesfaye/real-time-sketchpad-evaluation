@@ -22,15 +22,6 @@ export function SketchpadUserList({
   connectionStatus,
 }: UserListProps) {
 
-  /*
-   * Users are completely determined by the messages
-   * received from the server.
-   *
-   * We do NOT keep a second piece of React state for this.
-   *
-   * This also avoids calling setState() from inside
-   * useEffect(), which React now warns about.
-   */
   const users = useMemo<
     Record<string, UserInfo>
   >(() => {
@@ -41,9 +32,21 @@ export function SketchpadUserList({
     > = {};
 
 
+    /*
+     * Process messages in chronological order.
+     *
+     * room_users:
+     *   Replaces the current room snapshot.
+     *
+     * user_joined:
+     *   Adds or updates a user.
+     *
+     * user_left:
+     *   Removes a user.
+     */
+
     for (
-      const message
-      of messages
+      const message of messages
     ) {
 
       if (
@@ -52,20 +55,29 @@ export function SketchpadUserList({
       ) {
 
         /*
-         * The server sends the current users when
-         * a user enters the room.
+         * The backend sends the users who were already
+         * in the room when this connection was established.
          *
-         * Start with exactly the users supplied
-         * by the server.
+         * Reset the list to the authoritative server snapshot.
          */
+        Object.keys(next).forEach(
+          userId => {
+            delete next[userId];
+          }
+        );
+
         for (
-          const user
-          of message.users
+          const user of message.users ?? []
         ) {
 
-          next[
-            user.userId
-          ] = user;
+          if (
+            user?.userId
+          ) {
+
+            next[
+              user.userId
+            ] = user;
+          }
         }
 
       } else if (
@@ -73,21 +85,29 @@ export function SketchpadUserList({
         'user_joined'
       ) {
 
-        /*
-         * Add the newly joined user.
-         */
-        next[
-          message.user.userId
-        ] = message.user;
+        const user =
+          message.user;
+
+        if (
+          user?.userId
+        ) {
+
+          /*
+           * Add the user.
+           *
+           * If the user already exists, update their
+           * information instead of creating a duplicate.
+           */
+          next[
+            user.userId
+          ] = user;
+        }
 
       } else if (
         message.type ===
         'user_left'
       ) {
 
-        /*
-         * Remove the user who disconnected.
-         */
         delete next[
           message.userId
         ];
@@ -157,15 +177,20 @@ export function SketchpadUserList({
                   }}
                 />
 
-                <span className="font-medium">
-                  {user.name}
-                </span>
+                <div className="min-w-0 flex-1">
 
-                <span className="ml-auto text-xs text-gray-500">
-                  {new Date(
-                    user.joinedAt
-                  ).toLocaleTimeString()}
-                </span>
+                  <div className="truncate font-medium">
+                    {user.name}
+                  </div>
+
+                  <div className="text-xs text-gray-500">
+                    Joined{' '}
+                    {new Date(
+                      user.joinedAt
+                    ).toLocaleTimeString()}
+                  </div>
+
+                </div>
 
               </div>
             )

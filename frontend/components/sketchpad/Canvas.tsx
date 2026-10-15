@@ -17,6 +17,7 @@ import {
 
 import {
   WebSocketHookResult,
+  createClientOperationId,
 } from '@/lib/websocket';
 
 
@@ -65,10 +66,8 @@ function drawOperation(
   ctx: CanvasRenderingContext2D,
   op: DrawingOperation
 ) {
-
   const pts =
     op.points;
-
 
   if (
     pts.length === 0
@@ -76,13 +75,11 @@ function drawOperation(
     return;
   }
 
-
   const a =
     pts[0];
 
   const b =
     pts[pts.length - 1];
-
 
   ctx.strokeStyle =
     op.color;
@@ -99,13 +96,10 @@ function drawOperation(
   ctx.lineJoin =
     'round';
 
-
   switch (
     op.tool
   ) {
-
     case 'rectangle': {
-
       ctx.beginPath();
 
       ctx.rect(
@@ -120,9 +114,7 @@ function drawOperation(
       break;
     }
 
-
     case 'ellipse': {
-
       ctx.beginPath();
 
       ctx.ellipse(
@@ -144,9 +136,7 @@ function drawOperation(
       break;
     }
 
-
     case 'line': {
-
       ctx.beginPath();
 
       ctx.moveTo(
@@ -164,14 +154,11 @@ function drawOperation(
       break;
     }
 
-
     case 'pen':
     default: {
-
       if (
         pts.length === 1
       ) {
-
         ctx.beginPath();
 
         ctx.arc(
@@ -187,7 +174,6 @@ function drawOperation(
         break;
       }
 
-
       ctx.beginPath();
 
       ctx.moveTo(
@@ -195,19 +181,16 @@ function drawOperation(
         pts[0].y
       );
 
-
       for (
         let i = 1;
         i < pts.length;
         i++
       ) {
-
         ctx.lineTo(
           pts[i].x,
           pts[i].y
         );
       }
-
 
       ctx.stroke();
 
@@ -239,12 +222,10 @@ export const SketchpadCanvas =
       },
       ref
     ) {
-
       const canvasRef =
         useRef<HTMLCanvasElement>(
           null
         );
-
 
       /*
        * Operations confirmed by the server.
@@ -254,7 +235,6 @@ export const SketchpadCanvas =
           []
         );
 
-
       /*
        * Prevent duplicate operations.
        */
@@ -262,7 +242,6 @@ export const SketchpadCanvas =
         useRef<Set<string>>(
           new Set()
         );
-
 
       /*
        * Operation currently being drawn.
@@ -272,13 +251,11 @@ export const SketchpadCanvas =
           null
         );
 
-
       /*
        * Number of messages already processed.
        */
       const processedRef =
         useRef(0);
-
 
       /*
        * requestAnimationFrame handle.
@@ -286,20 +263,17 @@ export const SketchpadCanvas =
       const rafRef =
         useRef(0);
 
-
       /*
        * Cursor throttling.
        */
       const lastCursorSendRef =
         useRef(0);
 
-
       /*
        * Latest history callback.
        */
       const onHistoryChangeRef =
         useRef(onHistoryChange);
-
 
       const {
         sendMessage,
@@ -314,10 +288,8 @@ export const SketchpadCanvas =
       // ========================================================
 
       useEffect(() => {
-
         onHistoryChangeRef.current =
           onHistoryChange;
-
       }, [
         onHistoryChange,
       ]);
@@ -326,12 +298,6 @@ export const SketchpadCanvas =
       // ========================================================
       // REMOTE CURSORS
       // ========================================================
-      /*
-       * Remote cursors are derived from WebSocket messages.
-       *
-       * This avoids calling setState() synchronously inside
-       * the message-processing effect.
-       */
 
       const remoteCursors =
         useMemo<
@@ -340,41 +306,33 @@ export const SketchpadCanvas =
             RemoteCursor
           >
         >(() => {
-
           const cursors:
             Record<
               string,
               RemoteCursor
             > = {};
 
-
           for (
             const message
             of messages
           ) {
-
             switch (
               message.type
             ) {
-
               case 'clear_canvas': {
-
                 for (
                   const id
                   of Object.keys(
                     cursors
                   )
                 ) {
-
                   delete cursors[id];
                 }
 
                 break;
               }
 
-
               case 'cursor_move': {
-
                 if (
                   message.userId ===
                   userId
@@ -382,20 +340,17 @@ export const SketchpadCanvas =
                   break;
                 }
 
-
                 const cursorData =
                   OperationUtils
                     .deserializeCursorPosition(
                       message
                     );
 
-
                 if (
                   !cursorData
                 ) {
                   break;
                 }
-
 
                 cursors[
                   cursorData.userId
@@ -414,16 +369,12 @@ export const SketchpadCanvas =
                     Date.now(),
                 };
 
-
                 break;
               }
 
-
               case 'user_joined': {
-
                 const joinedUser =
                   message.user;
-
 
                 if (
                   joinedUser.userId ===
@@ -431,7 +382,6 @@ export const SketchpadCanvas =
                 ) {
                   break;
                 }
-
 
                 cursors[
                   joinedUser.userId
@@ -450,13 +400,10 @@ export const SketchpadCanvas =
                     Date.now(),
                 };
 
-
                 break;
               }
 
-
               case 'user_left': {
-
                 delete cursors[
                   message.userId
                 ];
@@ -464,15 +411,12 @@ export const SketchpadCanvas =
                 break;
               }
 
-
               default:
                 break;
             }
           }
 
-
           return cursors;
-
         }, [
           messages,
           userId,
@@ -485,26 +429,21 @@ export const SketchpadCanvas =
 
       const redraw =
         useCallback(() => {
-
           const canvas =
             canvasRef.current;
-
 
           if (!canvas) {
             return;
           }
-
 
           const ctx =
             canvas.getContext(
               '2d'
             );
 
-
           if (!ctx) {
             return;
           }
-
 
           ctx.clearRect(
             0,
@@ -513,29 +452,24 @@ export const SketchpadCanvas =
             canvas.height
           );
 
-
           for (
             const operation
             of operationsRef.current
           ) {
-
             drawOperation(
               ctx,
               operation
             );
           }
 
-
           if (
             activeOpRef.current
           ) {
-
             drawOperation(
               ctx,
               activeOpRef.current
             );
           }
-
         }, []);
 
 
@@ -545,25 +479,21 @@ export const SketchpadCanvas =
 
       const scheduleRedraw =
         useCallback(() => {
-
           if (
             rafRef.current
           ) {
             return;
           }
 
-
           rafRef.current =
             requestAnimationFrame(
               () => {
-
                 rafRef.current =
                   0;
 
                 redraw();
               }
             );
-
         }, [
           redraw,
         ]);
@@ -578,13 +508,11 @@ export const SketchpadCanvas =
           (
             operation: DrawingOperation
           ) => {
-
             if (
               !operation.id
             ) {
               return;
             }
-
 
             if (
               operationIdsRef.current.has(
@@ -594,16 +522,13 @@ export const SketchpadCanvas =
               return;
             }
 
-
             operationIdsRef.current.add(
               operation.id
             );
 
-
             operationsRef.current.push(
               operation
             );
-
           },
           []
         );
@@ -618,7 +543,6 @@ export const SketchpadCanvas =
           (
             operationId: string
           ) => {
-
             operationsRef.current =
               operationsRef.current.filter(
                 operation =>
@@ -626,11 +550,9 @@ export const SketchpadCanvas =
                   operationId
               );
 
-
             operationIdsRef.current.delete(
               operationId
             );
-
           },
           []
         );
@@ -641,7 +563,6 @@ export const SketchpadCanvas =
       // ========================================================
 
       useEffect(() => {
-
         /*
          * If messages were reset/replaced,
          * start processing from the beginning.
@@ -650,142 +571,113 @@ export const SketchpadCanvas =
           messages.length <
           processedRef.current
         ) {
-
           processedRef.current =
             0;
         }
-
 
         const freshMessages =
           messages.slice(
             processedRef.current
           );
 
-
         processedRef.current =
           messages.length;
-
 
         if (
           freshMessages.length === 0
         ) {
-
           return;
         }
 
-
         let stateChanged =
           false;
-
 
         for (
           const message
           of freshMessages
         ) {
-
           switch (
             message.type
           ) {
-
             // ==================================================
             // COMPLETE CANVAS STATE
             // ==================================================
 
             case 'canvas_state': {
-
               operationsRef.current =
                 [];
 
               operationIdsRef.current =
                 new Set();
 
-
               for (
                 const operation
                 of message.operations
               ) {
-
                 addOperation(
                   operation
                 );
               }
 
-
               activeOpRef.current =
                 null;
-
 
               stateChanged =
                 true;
 
-
               break;
             }
-
 
             // ==================================================
             // DRAWING OPERATION
             // ==================================================
 
             case 'drawing_operation': {
-
               addOperation(
                 message.operation
               );
 
-
               stateChanged =
                 true;
 
-
               break;
             }
-
 
             // ==================================================
             // UNDO
             // ==================================================
 
             case 'undo_operation': {
-
               removeOperation(
                 message.targetOperationId
               );
 
-
               stateChanged =
                 true;
 
-
               break;
             }
-
 
             // ==================================================
             // REDO
             // ==================================================
 
             case 'redo_operation': {
-
               addOperation(
                 message.operation
               );
 
-
               stateChanged =
                 true;
 
-
               break;
             }
-
 
             // ==================================================
             // CLEAR CANVAS
             // ==================================================
 
             case 'clear_canvas': {
-
               operationsRef.current =
                 [];
 
@@ -795,21 +687,17 @@ export const SketchpadCanvas =
               activeOpRef.current =
                 null;
 
-
               stateChanged =
                 true;
 
-
               break;
             }
-
 
             // ==================================================
             // HISTORY
             // ==================================================
 
             case 'history_state': {
-
               onHistoryChangeRef.current?.({
                 canUndo:
                   message.canUndo,
@@ -818,24 +706,19 @@ export const SketchpadCanvas =
                   message.canRedo,
               });
 
-
               break;
             }
-
 
             default:
               break;
           }
         }
 
-
         if (
           stateChanged
         ) {
-
           scheduleRedraw();
         }
-
       }, [
         messages,
         addOperation,
@@ -849,26 +732,20 @@ export const SketchpadCanvas =
       // ========================================================
 
       useEffect(() => {
-
         scheduleRedraw();
 
-
         return () => {
-
           if (
             rafRef.current
           ) {
-
             cancelAnimationFrame(
               rafRef.current
             );
-
 
             rafRef.current =
               0;
           }
         };
-
       }, [
         width,
         height,
@@ -882,21 +759,17 @@ export const SketchpadCanvas =
 
       const undo =
         useCallback(() => {
-
           if (
             connectionStatus !==
             'connected'
           ) {
-
             return;
           }
-
 
           sendMessage({
             type:
               'undo_operation',
           });
-
         }, [
           connectionStatus,
           sendMessage,
@@ -909,21 +782,17 @@ export const SketchpadCanvas =
 
       const redo =
         useCallback(() => {
-
           if (
             connectionStatus !==
             'connected'
           ) {
-
             return;
           }
-
 
           sendMessage({
             type:
               'redo_operation',
           });
-
         }, [
           connectionStatus,
           sendMessage,
@@ -936,15 +805,12 @@ export const SketchpadCanvas =
 
       const clear =
         useCallback(() => {
-
           if (
             connectionStatus !==
             'connected'
           ) {
-
             return;
           }
-
 
           sendMessage({
             type:
@@ -955,7 +821,6 @@ export const SketchpadCanvas =
             timestamp:
               new Date().toISOString(),
           });
-
         }, [
           connectionStatus,
           sendMessage,
@@ -990,26 +855,21 @@ export const SketchpadCanvas =
         (
           e: React.PointerEvent<HTMLCanvasElement>
         ) => {
-
           const rect =
             e.currentTarget
               .getBoundingClientRect();
-
 
           if (
             rect.width === 0 ||
             rect.height === 0
           ) {
-
             return {
               x: 0,
               y: 0,
             };
           }
 
-
           return {
-
             x:
               (e.clientX -
                 rect.left) *
@@ -1037,37 +897,29 @@ export const SketchpadCanvas =
         (
           e: React.PointerEvent<HTMLCanvasElement>
         ) => {
-
           if (
             connectionStatus !==
             'connected'
           ) {
-
             return;
           }
-
 
           if (
             e.pointerType ===
               'mouse' &&
             e.button !== 0
           ) {
-
             return;
           }
-
 
           e.currentTarget.setPointerCapture(
             e.pointerId
           );
 
-
           const point =
             toPoint(e);
 
-
           activeOpRef.current = {
-
             points: [
               point,
             ],
@@ -1087,7 +939,6 @@ export const SketchpadCanvas =
             userId,
           };
 
-
           scheduleRedraw();
         };
 
@@ -1100,14 +951,11 @@ export const SketchpadCanvas =
         (
           e: React.PointerEvent<HTMLCanvasElement>
         ) => {
-
           const point =
             toPoint(e);
 
-
           const activeOperation =
             activeOpRef.current;
-
 
           // ----------------------------------------------------
           // DRAWING
@@ -1116,28 +964,22 @@ export const SketchpadCanvas =
           if (
             activeOperation
           ) {
-
             if (
               activeOperation.tool ===
               'pen'
             ) {
-
               activeOperation.points.push(
                 point
               );
-
             } else {
-
               activeOperation.points = [
                 activeOperation.points[0],
                 point,
               ];
             }
 
-
             scheduleRedraw();
           }
-
 
           // ----------------------------------------------------
           // REMOTE CURSOR
@@ -1147,24 +989,19 @@ export const SketchpadCanvas =
             connectionStatus !==
             'connected'
           ) {
-
             return;
           }
 
-
           const now =
             performance.now();
-
 
           if (
             now -
               lastCursorSendRef.current >
             33
           ) {
-
             lastCursorSendRef.current =
               now;
-
 
             sendMessage({
               type:
@@ -1188,22 +1025,17 @@ export const SketchpadCanvas =
 
       const finishStroke =
         () => {
-
           const operation =
             activeOpRef.current;
-
 
           if (
             !operation
           ) {
-
             return;
           }
 
-
           activeOpRef.current =
             null;
-
 
           const valid =
             operation.tool ===
@@ -1211,43 +1043,41 @@ export const SketchpadCanvas =
               ? operation.points.length >= 1
               : operation.points.length >= 2;
 
-
           if (
             !valid
           ) {
-
             scheduleRedraw();
 
             return;
           }
-
 
           if (
             connectionStatus !==
             'connected'
           ) {
-
             scheduleRedraw();
 
             return;
           }
 
-
           /*
-           * Send to the server.
+           * Generate a stable client-side ID for this
+           * logical drawing operation.
            *
-           * The server is responsible for assigning
-           * the final operation ID/timestamp and
-           * broadcasting the operation.
+           * The server uses this ID for idempotency and
+           * duplicate protection.
            */
+          const clientOperationId =
+            createClientOperationId();
 
           sendMessage({
             type:
               'drawing_operation',
 
+            clientOperationId,
+
             operation,
           });
-
 
           scheduleRedraw();
         };
@@ -1259,7 +1089,6 @@ export const SketchpadCanvas =
 
       return (
         <div className="relative">
-
           <canvas
             ref={canvasRef}
             width={width}
@@ -1279,9 +1108,7 @@ export const SketchpadCanvas =
             }
           />
 
-
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
-
             {Object.entries(
               remoteCursors
             ).map(
@@ -1289,17 +1116,14 @@ export const SketchpadCanvas =
                 id,
                 cursor,
               ]) => {
-
                 if (
                   cursor.x ===
                     undefined ||
                   cursor.y ===
                     undefined
                 ) {
-
                   return null;
                 }
-
 
                 return (
                   <div
@@ -1316,7 +1140,6 @@ export const SketchpadCanvas =
                         'translate(-50%, -50%)',
                     }}
                   >
-
                     <div
                       className="h-2 w-2 rounded-full"
                       style={{
@@ -1329,20 +1152,16 @@ export const SketchpadCanvas =
                       }}
                     />
 
-
                     {cursor.name && (
                       <div className="ml-2 mt-1 whitespace-nowrap rounded bg-white px-1 py-0.5 text-xs text-gray-600">
                         {cursor.name}
                       </div>
                     )}
-
                   </div>
                 );
               }
             )}
-
           </div>
-
 
           <p>
             Connection:{' '}
@@ -1351,7 +1170,6 @@ export const SketchpadCanvas =
             {error &&
               ` (${error})`}
           </p>
-
         </div>
       );
     }

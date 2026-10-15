@@ -108,28 +108,23 @@ class ConnectionManager:
             str,
             asyncio.Lock,
         ] = {}
+        # Lock for protecting access to the room_locks dict
+        self._room_locks_lock: asyncio.Lock = asyncio.Lock()
 
     # ========================================================
     # ROOM LOCK
     # ========================================================
 
-    def get_room_lock(
+    async def get_room_lock(
         self,
         room_id: str,
     ) -> asyncio.Lock:
-
-        lock = self.room_locks.get(
-            room_id
-        )
-
-        if lock is None:
-            lock = asyncio.Lock()
-
-            self.room_locks[
-                room_id
-            ] = lock
-
-        return lock
+        async with self._room_locks_lock:
+            lock = self.room_locks.get(room_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self.room_locks[room_id] = lock
+            return lock
 
     # ========================================================
     # CONNECT
@@ -145,7 +140,7 @@ class ConnectionManager:
 
         await websocket.accept()
 
-        lock = self.get_room_lock(
+        lock = await self.get_room_lock(
             room_id
         )
 
@@ -231,7 +226,7 @@ class ConnectionManager:
         if room_id not in self.active_connections:
             return
 
-        lock = self.get_room_lock(
+        lock = await self.get_room_lock(
             room_id
         )
 
@@ -389,7 +384,7 @@ class ConnectionManager:
                     connections.items()
                 )
             ],
-            return_exceptions=False,
+            return_exceptions=True,
         )
 
         failed_users = [

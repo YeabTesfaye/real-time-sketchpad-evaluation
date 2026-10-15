@@ -64,6 +64,11 @@ import {
   useWebSocket,
 } from '@/lib/websocket';
 
+import type {
+  UserInfo,
+  WebSocketMessage,
+} from '@/lib/websocket';
+
 import {
   cn,
 } from '@/lib/utils';
@@ -484,6 +489,185 @@ function PanelSheet({
 
 
 /* ============================================================
+   ROOM USERS
+   ============================================================ */
+
+/*
+ * Build the authoritative list of OTHER users in the room
+ * from the single WebSocket owned by RoomClient.
+ *
+ * Backend events:
+ *
+ *   room_users
+ *      -> initial users for a newly connected client
+ *
+ *   user_joined
+ *      -> add user
+ *
+ *   user_left
+ *      -> remove user
+ *
+ * The current user is deliberately excluded because the
+ * PeoplePanel already displays the current user separately
+ * as "You".
+ */
+function getRoomUsers(
+  messages: WebSocketMessage[],
+  currentUserId: string
+): UserInfo[] {
+
+  const users: Record<
+    string,
+    UserInfo
+  > = {};
+
+
+  for (
+    const message of messages
+  ) {
+
+    /* --------------------------------------------------------
+       INITIAL ROOM USERS
+       -------------------------------------------------------- */
+
+    if (
+      message.type ===
+      'room_users'
+    ) {
+
+      /*
+       * room_users is a snapshot from the server.
+       *
+       * Replace the current collection rather than merely
+       * adding to it. This prevents stale users surviving
+       * reconnects.
+       */
+      for (
+        const key of Object.keys(
+          users
+        )
+      ) {
+
+        delete users[key];
+      }
+
+
+      for (
+        const roomUser of message.users
+      ) {
+
+        if (
+          roomUser.userId ===
+          currentUserId
+        ) {
+          continue;
+        }
+
+
+        users[
+          roomUser.userId
+        ] = roomUser;
+      }
+
+
+      continue;
+    }
+
+
+    /* --------------------------------------------------------
+       USER JOINED
+       -------------------------------------------------------- */
+
+    if (
+      message.type ===
+      'user_joined'
+    ) {
+
+      const joinedUser =
+        message.user;
+
+
+      if (
+        joinedUser.userId !==
+        currentUserId
+      ) {
+
+        users[
+          joinedUser.userId
+        ] = joinedUser;
+
+      }
+
+
+      continue;
+    }
+
+
+    /* --------------------------------------------------------
+       USER LEFT
+       -------------------------------------------------------- */
+
+    if (
+      message.type ===
+      'user_left'
+    ) {
+
+      delete users[
+        message.userId
+      ];
+
+    }
+  }
+
+
+  return Object.values(
+    users
+  );
+}
+
+
+/* ============================================================
+   PEOPLE MESSAGE SNAPSHOT
+   ============================================================ */
+
+/*
+ * PeoplePanel/UserList currently receives `messages`.
+ *
+ * We give it a canonical room_users snapshot generated from
+ * the SAME socket used by Canvas.
+ *
+ * This means UserList does not need its own WebSocket.
+ */
+function makePeopleMessages(
+  messages: WebSocketMessage[],
+  currentUserId: string
+): WebSocketMessage[] {
+
+  const users =
+    getRoomUsers(
+      messages,
+      currentUserId
+    );
+
+
+  /*
+   * Keep the original messages so existing PeoplePanel
+   * functionality remains compatible.
+   *
+   * The final room_users message represents the current
+   * authoritative participant snapshot.
+   */
+  return [
+    ...messages,
+    {
+      type: 'room_users',
+      users,
+    } as WebSocketMessage,
+  ];
+}
+
+
+/* ============================================================
    WORKSPACE
    ============================================================ */
 
@@ -506,9 +690,11 @@ function RoomWorkspace({
 
 
   /*
-   * ONE WebSocket for the whole room.
+   * IMPORTANT:
    *
-   * Canvas and People both use this connection.
+   * There is exactly ONE WebSocket for the room.
+   *
+   * Canvas and PeoplePanel both consume this same connection.
    */
   const socket =
     useWebSocket(
@@ -551,6 +737,24 @@ function RoomWorkspace({
     useRef<
       SketchpadCanvasHandle
     >(null);
+
+
+  /*
+   * Build the participant messages from the SAME
+   * WebSocket messages used by the rest of the room.
+   */
+  const peopleMessages =
+    useMemo(
+      () =>
+        makePeopleMessages(
+          socket.messages,
+          user.id
+        ),
+      [
+        socket.messages,
+        user.id,
+      ]
+    );
 
 
   const newRoom =
@@ -642,8 +846,15 @@ function RoomWorkspace({
         user
       }
 
+      /*
+       * IMPORTANT:
+       * Do NOT create another useWebSocket inside PeoplePanel
+       * or UserList.
+       *
+       * Both receive this exact message stream.
+       */
       messages={
-        socket.messages
+        peopleMessages
       }
 
       connectionStatus={
@@ -922,6 +1133,13 @@ export default function RoomClient({
   }
 
 
+  /*
+   * This MUST match backend make_user_color().
+   *
+   * The backend owns the final user information, but this
+   * gives the local identity the same deterministic color
+   * before the WebSocket events arrive.
+   */
   const computeColor =
     (
       userId: string
@@ -941,6 +1159,11 @@ export default function RoomClient({
           ((hash << 5) -
             hash);
 
+        /*
+         * JavaScript bitwise operators are signed 32-bit,
+         * which matches the backend implementation.
+         */
+        hash |= 0;
       }
 
 
